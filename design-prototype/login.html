@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anmelden — Velofreundliches Wetzikon Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/admin.css">
+</head>
+<body>
+
+<div class="adm-auth">
+  <aside class="adm-auth__side">
+    <div class="adm-auth__side-top">
+      <a href="login.html" class="vw-logo" style="pointer-events:none;">
+        <span class="vw-logo__bar"></span>
+        <span class="vw-logo__text">
+          <span class="vw-logo__top">velofreundliches</span>
+          <span class="vw-logo__bottom">WETZIKON</span>
+        </span>
+      </a>
+    </div>
+  </aside>
+
+  <div class="adm-auth__main">
+    <div class="adm-auth__card">
+      <div class="adm-auth__logo-mobile">
+        <a href="login.html" class="vw-logo" style="pointer-events:none;">
+          <span class="vw-logo__bar"></span>
+          <span class="vw-logo__text">
+            <span class="vw-logo__top">velofreundliches</span>
+            <span class="vw-logo__bottom">WETZIKON</span>
+          </span>
+        </a>
+      </div>
+
+      <span class="adm-auth__eyebrow">Admin-Bereich</span>
+      <h1 class="adm-auth__title">Anmelden</h1>
+
+      <div id="loginSuccess" class="adm-alert adm-alert--success" style="display:none;">
+        <i data-lucide="check-circle" width="16" height="16"></i>
+        <span>Passwort erfolgreich geändert.</span>
+      </div>
+      <div id="loginError" class="adm-alert adm-alert--error" style="display:none;">
+        <i data-lucide="alert-circle" width="16" height="16"></i>
+        <span>E-Mail-Adresse oder Passwort ist falsch.</span>
+      </div>
+
+      <form id="loginForm" novalidate>
+        <div class="adm-field">
+          <label class="adm-label" for="email">E-Mail-Adresse <span class="adm-required">*</span></label>
+          <input type="email" id="email" name="email" autocomplete="username" placeholder="vorname.nachname@velofreundliches-wetzikon.ch" required>
+        </div>
+        <div class="adm-field">
+          <label class="adm-label" for="password">Passwort <span class="adm-required">*</span></label>
+          <input type="password" id="password" name="password" autocomplete="current-password" placeholder="••••••••" required>
+        </div>
+        <div class="adm-field" style="display:flex;align-items:center;justify-content:space-between;">
+          <label class="adm-checkbox-row"><input type="checkbox" id="remember" style="width:16px;height:16px;min-height:0;"> Angemeldet bleiben</label>
+          <a href="forgot-password.html" style="font-size:13px;text-decoration:none;">Passwort vergessen?</a>
+        </div>
+        <button type="submit" class="adm-btn adm-btn--primary adm-btn--block" style="margin-top:6px;">
+          Weiter <i data-lucide="arrow-right" width="16" height="16"></i>
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+
+  if (new URLSearchParams(window.location.search).get('reset') === '1') {
+    document.getElementById('loginSuccess').style.display = 'flex';
+  }
+
+  var form = document.getElementById('loginForm');
+  var errorBox = document.getElementById('loginError');
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    // Prototype only: any non-empty email/password "succeeds" and proceeds to 2FA.
+    // A real implementation validates server-side and only then issues/emails the code.
+    var u = document.getElementById('email').value.trim();
+    var p = document.getElementById('password').value;
+    if (!u || !p) {
+      errorBox.style.display = 'flex';
+      return;
+    }
+    window.location.href = 'verify.html?flow=login';
+  });
+});
+</script>
+</body>
+</html>

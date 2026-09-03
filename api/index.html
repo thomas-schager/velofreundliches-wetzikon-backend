@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API-Dokumentation — Velofreundliches Wetzikon</title>
+<link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+<style>
+  body { margin: 0; background: #fafaf8; }
+  .topbar-note {
+    background: #0d0d0d; color: #fff; font: 400 13px/1.5 -apple-system, "Roboto", sans-serif;
+    padding: 10px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .topbar-note b { color: #ff8a5c; font-weight: 600; }
+  .topbar-note a { color: #fff; }
+  .swagger-ui .topbar { display: none; }
+</style>
+</head>
+<body>
+  <div class="topbar-note">
+    <span><b>velofreundliches-wetzikon-backend</b> — API-Spezifikation (Entwurf, v0.1.0)</span>
+    <span>Quelle: <a href="openapi.yaml">openapi.yaml</a></span>
+    <span>Strategie: <a href="../docs/api-implementation-strategy.md">Implementierungsstrategie</a></span>
+    <span>Prototyp: <a href="../design-prototype/index.html">Admin-UI</a></span>
+  </div>
+  <div id="swagger-ui"></div>
+
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = function () {
+      window.ui = SwaggerUIBundle({
+        url: 'openapi.yaml',
+        dom_id: '#swagger-ui',
+        presets: [SwaggerUIBundle.presets.apis],
+        layout: 'BaseLayout',
+        deepLinking: true,
+        defaultModelsExpandDepth: 2,
+        docExpansion: 'list'
+      });
+    };
+  </script>
+</body>
+</html>

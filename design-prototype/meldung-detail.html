@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meldung prüfen — Velofreundliches Wetzikon Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/admin.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  #meldungMap { height: 100%; width: 100%; }
+</style>
+</head>
+<body data-page="meldungen">
+
+<div class="adm-shell">
+  <div class="adm-mobile-scrim"></div>
+
+  <aside class="adm-sidebar">
+    <div class="adm-sidebar__head">
+      <a href="dashboard.html" class="vw-logo" style="pointer-events:none;">
+        <span class="vw-logo__bar"></span>
+        <span class="vw-logo__text">
+          <span class="vw-logo__top">velofreundliches</span>
+          <span class="vw-logo__bottom">WETZIKON</span>
+        </span>
+      </a>
+    </div>
+    <nav class="adm-sidebar__nav">
+      <div class="adm-sidebar__section">Übersicht</div>
+      <a class="adm-navlink" data-page="dashboard" href="dashboard.html"><i data-lucide="layout-dashboard"></i><span class="adm-navlink__label">Übersicht</span></a>
+
+      <div class="adm-sidebar__section">VeloMelder</div>
+      <a class="adm-navlink" data-page="meldungen" href="meldungen.html"><i data-lucide="message-square-warning"></i><span class="adm-navlink__label">Meldungen</span><span class="adm-navlink__badge">12</span></a>
+      <a class="adm-navlink" data-page="routen" href="routes-placeholder.html"><i data-lucide="route"></i><span class="adm-navlink__label">Routen</span></a>
+
+      <div class="adm-sidebar__section">Verwaltung</div>
+      <a class="adm-navlink is-disabled" href="#"><i data-lucide="users"></i><span class="adm-navlink__label">Benutzer</span><span class="adm-navlink__soon">Bald</span></a>
+      <a class="adm-navlink is-disabled" href="#"><i data-lucide="settings"></i><span class="adm-navlink__label">Einstellungen</span><span class="adm-navlink__soon">Bald</span></a>
+    </nav>
+    <div class="adm-sidebar__foot">
+      <button class="adm-collapse-btn" id="admCollapseBtn">
+        <i data-lucide="panel-left-close" width="18" height="18"></i>
+        <span>Einklappen</span>
+      </button>
+    </div>
+  </aside>
+
+  <div class="adm-content">
+    <header class="adm-topbar">
+      <button class="adm-topbar__burger" id="admBurger"><i data-lucide="menu"></i></button>
+      <span class="adm-topbar__title">Meldung prüfen</span>
+      <span class="adm-topbar__spacer"></span>
+      <div class="adm-topbar__user" id="admUserMenu">
+        <span class="adm-avatar">SM</span>
+        <span class="adm-topbar__user-name">Sara Meier</span>
+        <i data-lucide="chevron-down" width="14" height="14" style="color:var(--color-muted);"></i>
+      </div>
+    </header>
+
+    <main class="adm-main" style="padding-bottom:100px;">
+      <a href="meldungen.html" class="adm-auth__back" style="margin-bottom:16px;"><i data-lucide="arrow-left" width="14" height="14"></i> Zurück zu Meldungen</a>
+
+      <div class="adm-page-head">
+        <div>
+          <h1 id="pageTitle" style="display:flex;align-items:center;gap:10px;">Meldung <span id="meldungId" style="font-family:monospace;font-size:16px;color:var(--color-muted);"></span></h1>
+          <p>Eingegangen <span id="createdAtText"></span></p>
+        </div>
+        <div class="adm-page-head__actions">
+          <span id="statusBadge"></span>
+        </div>
+      </div>
+
+      <div class="adm-detail-grid">
+        <!-- LEFT: editable content -->
+        <div>
+          <div class="adm-field">
+            <label class="adm-label">Standort</label>
+            <div class="adm-detail-map">
+              <div id="meldungMap"></div>
+              <span class="adm-map-hint">Pin ziehen, um den Standort zu korrigieren</span>
+            </div>
+          </div>
+
+          <div class="adm-field">
+            <label class="adm-label">Bewertung</label>
+            <div class="adm-rating-edit" id="ratingEdit">
+              <button type="button" data-r="1"><span class="adm-r-bar"></span><span class="adm-r-label">Gefährlich</span></button>
+              <button type="button" data-r="2"><span class="adm-r-bar"></span><span class="adm-r-label">Schlecht</span></button>
+              <button type="button" data-r="3"><span class="adm-r-bar"></span><span class="adm-r-label">Akzeptabel</span></button>
+              <button type="button" data-r="4"><span class="adm-r-bar"></span><span class="adm-r-label">Gut</span></button>
+              <button type="button" data-r="5"><span class="adm-r-bar"></span><span class="adm-r-label">Ausgezeichnet</span></button>
+            </div>
+          </div>
+
+          <div class="adm-field">
+            <label class="adm-label" for="commentField">Kommentar</label>
+            <textarea id="commentField" rows="4"></textarea>
+          </div>
+
+          <div class="adm-field">
+            <label class="adm-label">Fotos</label>
+            <div class="adm-photo-grid" id="photoGrid"></div>
+          </div>
+
+          <div class="adm-field" style="display:flex;gap:24px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:200px;">
+              <label class="adm-label" for="nameField">Name</label>
+              <input type="text" id="nameField" placeholder="Name (optional)">
+            </div>
+            <div style="padding-top:26px;">
+              <label class="adm-checkbox-row"><input type="checkbox" id="anonField" style="width:16px;height:16px;min-height:0;"> Anonym anzeigen</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: metadata -->
+        <div>
+          <div class="adm-card">
+            <div style="font:600 13px var(--font-display);margin-bottom:14px;">Details</div>
+            <div class="adm-kv">
+              <div class="adm-kv__row"><span class="adm-kv__label">ID</span><span class="adm-kv__value adm-kv__value--mono" id="kvId"></span></div>
+              <div class="adm-kv__row"><span class="adm-kv__label">Koordinaten</span><span class="adm-kv__value adm-kv__value--mono" id="kvLatLng"></span></div>
+              <div class="adm-kv__row"><span class="adm-kv__label">Adresse (geokodiert)</span><span class="adm-kv__value" id="kvAddress"></span></div>
+              <div class="adm-kv__row"><span class="adm-kv__label">Distanz zur Adresse</span><span class="adm-kv__value" id="kvDistance"></span></div>
+              <div class="adm-kv__row"><span class="adm-kv__label">Angezeigt als</span><span class="adm-kv__value" id="kvDisplayLabel"></span></div>
+              <div class="adm-kv__row"><span class="adm-kv__label">E-Mail (intern)</span><span class="adm-kv__value adm-kv__value--email" id="kvEmail"></span></div>
+              <div class="adm-kv__row"><span class="adm-kv__label">E-Mail bestätigt</span><span class="adm-kv__value" id="kvConfirmed"></span></div>
+            </div>
+            <div class="adm-internal-note">
+              <i data-lucide="lock" width="14" height="14"></i>
+              <span>Die E-Mail-Adresse ist ausschliesslich für die interne Moderation sichtbar. Sie erscheint in keiner öffentlichen Ansicht oder API-Antwort (siehe API-Spezifikation, Tag "Admin").</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <div class="adm-sticky-actions" style="margin-left:var(--space-7);margin-right:var(--space-7);max-width:1320px;margin-inline:auto;">
+      <span class="adm-sticky-actions__status">Status: <strong id="stickyStatusText">Neu — noch nicht geprüft</strong></span>
+      <button class="adm-btn adm-btn--danger" id="btnDecline"><i data-lucide="x" width="15" height="15"></i> Ablehnen</button>
+      <button class="adm-btn adm-btn--secondary" id="btnSave"><i data-lucide="save" width="15" height="15"></i> Änderungen speichern</button>
+      <button class="adm-btn adm-btn--primary" id="btnPublish"><i data-lucide="check" width="15" height="15"></i> Veröffentlichen</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="assets/admin.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  /* ------------------------------------------------------------------
+   * Prototype data. In the real app this loads via
+   * GET /api/admin/reports/{id} (see api/openapi.yaml) -- field names
+   * below match that response shape exactly (id, lat, lng, rating,
+   * comment, photos, name, anonymous, address, addressDistanceM,
+   * createdAt, email, emailConfirmed, status). The list page always
+   * links here with a real ?id=, but every id resolves to this one
+   * sample record for the prototype.
+   * ------------------------------------------------------------------ */
+  var meldung = {
+    id: new URLSearchParams(window.location.search).get('id') || 'm-2041',
+    lat: 47.3241,
+    lng: 8.7971,
+    rating: 1,
+    comment: 'Velostreifen endet abrupt vor der Kreuzung ohne Übergang zur Strasse. Velofahrende müssen unvermittelt auf die Fahrbahn wechseln, was besonders im Berufsverkehr gefährlich ist.',
+    photos: [
+      'https://picsum.photos/seed/velo-2041-1/480/360',
+      'https://picsum.photos/seed/velo-2041-2/480/360'
+    ],
+    name: '',
+    anonymous: true,
+    address: 'Usterstrasse 12, Wetzikon',
+    addressDistanceM: 8,
+    email: 'm.beispiel@example.ch',
+    emailConfirmed: true,
+    createdAt: '2026-08-19T07:14:00+02:00',
+    status: 'neu' // neu | veroeffentlicht | abgelehnt
+  };
+
+  var RATINGS = {
+    1: 'Gefährlich', 2: 'Schlecht', 3: 'Akzeptabel', 4: 'Gut', 5: 'Ausgezeichnet'
+  };
+
+  function formatAddressLabel(address, distanceM) {
+    if (!address || distanceM == null) return null;
+    if (distanceM <= 20) return address;
+    if (distanceM <= 50) return 'In der Nähe von ' + address;
+    return null;
+  }
+
+  function statusBadgeHtml(status) {
+    if (status === 'veroeffentlicht') return '<span class="adm-badge adm-badge--published"><span class="adm-badge__dot"></span>Veröffentlicht</span>';
+    if (status === 'abgelehnt') return '<span class="adm-badge adm-badge--declined"><span class="adm-badge__dot"></span>Abgelehnt</span>';
+    return '<span class="adm-badge adm-badge--new"><span class="adm-badge__dot"></span>Neu</span>';
+  }
+
+  function statusStickyText(status) {
+    if (status === 'veroeffentlicht') return 'Veröffentlicht';
+    if (status === 'abgelehnt') return 'Abgelehnt';
+    return 'Neu — noch nicht geprüft';
+  }
+
+  /* ---- Populate header ---- */
+  document.getElementById('meldungId').textContent = '#' + meldung.id;
+  document.getElementById('kvId').textContent = meldung.id;
+  document.getElementById('createdAtText').textContent = new Date(meldung.createdAt).toLocaleString('de-CH', { dateStyle: 'medium', timeStyle: 'short' });
+  document.getElementById('statusBadge').innerHTML = statusBadgeHtml(meldung.status);
+  document.getElementById('stickyStatusText').textContent = statusStickyText(meldung.status);
+
+  /* ---- Populate form fields ---- */
+  document.getElementById('commentField').value = meldung.comment;
+  document.getElementById('nameField').value = meldung.name;
+  document.getElementById('anonField').checked = meldung.anonymous;
+  document.getElementById('nameField').disabled = meldung.anonymous;
+
+  document.getElementById('anonField').addEventListener('change', function () {
+    document.getElementById('nameField').disabled = this.checked;
+  });
+
+  /* ---- Rating editor ---- */
+  var ratingEdit = document.getElementById('ratingEdit');
+  function selectRating(r) {
+    Array.prototype.slice.call(ratingEdit.querySelectorAll('button')).forEach(function (b) {
+      b.classList.toggle('is-selected', Number(b.dataset.r) === r);
+    });
+  }
+  ratingEdit.querySelectorAll('button').forEach(function (btn) {
+    btn.addEventListener('click', function () { selectRating(Number(btn.dataset.r)); });
+  });
+  selectRating(meldung.rating);
+
+  /* ---- Photos ---- */
+  var photoGrid = document.getElementById('photoGrid');
+  meldung.photos.forEach(function (url, i) {
+    var thumb = document.createElement('div');
+    thumb.className = 'adm-photo-thumb';
+    thumb.innerHTML = '<img src="' + url + '" alt="Foto ' + (i + 1) + '">' +
+      '<button type="button" class="adm-photo-thumb__remove" aria-label="Foto entfernen"><i data-lucide="x" width="12" height="12"></i></button>';
+    thumb.querySelector('.adm-photo-thumb__remove').addEventListener('click', function () { thumb.remove(); });
+    photoGrid.appendChild(thumb);
+  });
+  if (meldung.photos.length === 0) {
+    photoGrid.innerHTML = '<p style="color:var(--color-muted);font-size:13px;">Keine Fotos angehängt.</p>';
+  }
+
+  /* ---- Metadata panel ---- */
+  document.getElementById('kvLatLng').textContent = meldung.lat.toFixed(5) + ', ' + meldung.lng.toFixed(5);
+  document.getElementById('kvAddress').textContent = meldung.address || '—';
+  document.getElementById('kvDistance').textContent = meldung.addressDistanceM != null ? meldung.addressDistanceM + ' m' : '—';
+  document.getElementById('kvDisplayLabel').textContent = formatAddressLabel(meldung.address, meldung.addressDistanceM) || '(wird nicht angezeigt)';
+  document.getElementById('kvEmail').innerHTML = meldung.email + (meldung.emailConfirmed ? ' <i data-lucide="check-circle" width="13" height="13" style="color:var(--color-success);"></i>' : '');
+  document.getElementById('kvConfirmed').textContent = meldung.emailConfirmed ? 'Ja' : 'Nein';
+
+  /* ---- Map (draggable pin, matching the public form's "Standort anpassen") ---- */
+  var map = L.map('meldungMap', { zoomControl: false }).setView([meldung.lat, meldung.lng], 16);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap',
+    maxZoom: 19
+  }).addTo(map);
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+  var marker = L.marker([meldung.lat, meldung.lng], { draggable: true }).addTo(map);
+  marker.on('dragend', function () {
+    var pos = marker.getLatLng();
+    document.getElementById('kvLatLng').textContent = pos.lat.toFixed(5) + ', ' + pos.lng.toFixed(5);
+  });
+
+  /* ---- Actions (prototype: no real backend, just simulate + return to list) ---- */
+  document.getElementById('btnSave').addEventListener('click', function () {
+    alert('Änderungen gespeichert (Prototyp — kein echtes Backend). In der echten App: PATCH /api/admin/reports/' + meldung.id);
+  });
+  document.getElementById('btnPublish').addEventListener('click', function () {
+    alert('Meldung veröffentlicht (Prototyp). In der echten App: PATCH /api/admin/reports/' + meldung.id + ' { status: "published" }');
+    window.location.href = 'meldungen.html?status=veroeffentlicht';
+  });
+  document.getElementById('btnDecline').addEventListener('click', function () {
+    if (!confirm('Diese Meldung wirklich ablehnen? Sie erscheint danach in keiner öffentlichen Ansicht.')) return;
+    alert('Meldung abgelehnt (Prototyp). In der echten App: PATCH /api/admin/reports/' + meldung.id + ' { status: "declined" }');
+    window.location.href = 'meldungen.html?status=abgelehnt';
+  });
+
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+});
+</script>
+</body>
+</html>

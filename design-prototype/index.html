@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Klickbarer Prototyp — Admin Backend</title>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@600;700&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<style>
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; font-family: var(--font-body); background: var(--color-background); color: var(--color-text); padding: 40px 20px; }
+  .wrap { max-width: 640px; }
+  h1 { font-family: var(--font-display); font-weight: 700; font-size: 30px; margin: 0 0 10px; letter-spacing: var(--tracking-tight); }
+  p.lead { color: var(--color-text-muted); line-height: 1.6; margin: 0 0 32px; }
+  h2 { font-family: var(--font-display); font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-muted); margin: 28px 0 12px; }
+  .links { display: flex; flex-direction: column; gap: 10px; }
+  a.card { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border: 1px solid var(--color-border); border-radius: var(--radius-md); text-decoration: none; color: var(--color-text); transition: border-color 180ms, box-shadow 180ms; background: #fff; }
+  a.card:hover { border-color: var(--color-primary); box-shadow: var(--shadow-md); }
+  a.card b { font-family: var(--font-display); font-weight: 600; }
+  a.card span { font-size: 13px; color: var(--color-text-muted); display: block; margin-top: 2px; }
+  .note { margin-top: 32px; font-size: 13px; color: var(--color-muted); line-height: 1.6; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Admin Backend — Klickbarer Prototyp</h1>
+    <p class="lead">Statisches HTML/CSS/JS, kein echtes Backend dahinter — jede Aktion navigiert
+       zur nächsten Seite oder zeigt eine simulierte Bestätigung. Gebaut auf den Design-Tokens aus
+       <code>velofreundliches-wetzikon-design-system</code>.</p>
+
+    <h2>1 — Anmeldung</h2>
+    <div class="links">
+      <a class="card" href="login.html"><span><b>Anmelden</b><span>E-Mail-Adresse + Passwort → Weiter zu Schritt 2</span></span></a>
+      <a class="card" href="verify.html?flow=login"><span><b>2FA-Code</b><span>6-stelliger Code per E-Mail (gemeinsame Komponente für Login &amp; Reset)</span></span></a>
+      <a class="card" href="forgot-password.html"><span><b>Passwort vergessen</b><span>E-Mail-Adresse → Code → neues Passwort</span></span></a>
+    </div>
+
+    <h2>2 — Anwendung (Überblick)</h2>
+    <div class="links">
+      <a class="card" href="dashboard.html"><span><b>Übersicht</b><span>Sidebar (einklappbar) + Kennzahlen + Warteschlange</span></span></a>
+    </div>
+
+    <h2>3 — VeloMelder-Funktionalität</h2>
+    <div class="links">
+      <a class="card" href="meldungen.html"><span><b>Meldungen</b><span>Liste, Filter nach Status</span></span></a>
+      <a class="card" href="meldung-detail.html?id=m-2041"><span><b>Meldung prüfen</b><span>Karte, Bewertung, Fotos, Name — bearbeiten, veröffentlichen, ablehnen</span></span></a>
+    </div>
+
+    <p class="note">
+      4 (API-Spezifikation &amp; Implementierungsstrategie) liegt nicht hier, sondern in
+      <code>../api/index.html</code> und <code>../docs/api-implementation-strategy.md</code> —
+      keine HTML-Prototypseiten, wie im Auftrag vorgesehen.
+    </p>
+  </div>
+</body>
+</html>

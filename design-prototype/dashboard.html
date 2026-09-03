@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Übersicht — Velofreundliches Wetzikon Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/admin.css">
+</head>
+<body data-page="dashboard">
+
+<div class="adm-shell">
+  <div class="adm-mobile-scrim"></div>
+
+  <aside class="adm-sidebar">
+    <div class="adm-sidebar__head">
+      <a href="dashboard.html" class="vw-logo" style="pointer-events:none;">
+        <span class="vw-logo__bar"></span>
+        <span class="vw-logo__text">
+          <span class="vw-logo__top">velofreundliches</span>
+          <span class="vw-logo__bottom">WETZIKON</span>
+        </span>
+      </a>
+    </div>
+    <nav class="adm-sidebar__nav">
+      <div class="adm-sidebar__section">Übersicht</div>
+      <a class="adm-navlink" data-page="dashboard" href="dashboard.html"><i data-lucide="layout-dashboard"></i><span class="adm-navlink__label">Übersicht</span></a>
+
+      <div class="adm-sidebar__section">VeloMelder</div>
+      <a class="adm-navlink" data-page="meldungen" href="meldungen.html"><i data-lucide="message-square-warning"></i><span class="adm-navlink__label">Meldungen</span><span class="adm-navlink__badge">12</span></a>
+      <a class="adm-navlink" data-page="routen" href="routes-placeholder.html"><i data-lucide="route"></i><span class="adm-navlink__label">Routen</span></a>
+
+      <div class="adm-sidebar__section">Verwaltung</div>
+      <a class="adm-navlink is-disabled" href="#"><i data-lucide="users"></i><span class="adm-navlink__label">Benutzer</span><span class="adm-navlink__soon">Bald</span></a>
+      <a class="adm-navlink is-disabled" href="#"><i data-lucide="settings"></i><span class="adm-navlink__label">Einstellungen</span><span class="adm-navlink__soon">Bald</span></a>
+    </nav>
+    <div class="adm-sidebar__foot">
+      <button class="adm-collapse-btn" id="admCollapseBtn">
+        <i data-lucide="panel-left-close" width="18" height="18"></i>
+        <span>Einklappen</span>
+      </button>
+    </div>
+  </aside>
+
+  <div class="adm-content">
+    <header class="adm-topbar">
+      <button class="adm-topbar__burger" id="admBurger"><i data-lucide="menu"></i></button>
+      <span class="adm-topbar__title">Übersicht</span>
+      <span class="adm-topbar__spacer"></span>
+      <div class="adm-topbar__user" id="admUserMenu">
+        <span class="adm-avatar">SM</span>
+        <span class="adm-topbar__user-name">Sara Meier</span>
+        <i data-lucide="chevron-down" width="14" height="14" style="color:var(--color-muted);"></i>
+      </div>
+    </header>
+
+    <main class="adm-main">
+      <div class="adm-page-head">
+        <div>
+          <h1>Guten Tag, Sara</h1>
+          <p>Hier ist, was heute ansteht.</p>
+        </div>
+      </div>
+
+      <div class="adm-stat-grid">
+        <div class="adm-stat-card adm-stat-card--accent">
+          <div class="adm-stat-card__label">Zu prüfen <i data-lucide="clock" width="14" height="14"></i></div>
+          <div class="adm-stat-card__value">12</div>
+          <a class="adm-stat-card__link" href="meldungen.html?status=neu">Jetzt prüfen <i data-lucide="arrow-right" width="12" height="12"></i></a>
+        </div>
+        <div class="adm-stat-card">
+          <div class="adm-stat-card__label">Veröffentlicht <i data-lucide="check-circle" width="14" height="14"></i></div>
+          <div class="adm-stat-card__value">48 <small>/ 30 Tage</small></div>
+          <a class="adm-stat-card__link" href="meldungen.html?status=veroeffentlicht">Ansehen <i data-lucide="arrow-right" width="12" height="12"></i></a>
+        </div>
+        <div class="adm-stat-card">
+          <div class="adm-stat-card__label">Abgelehnt <i data-lucide="x-circle" width="14" height="14"></i></div>
+          <div class="adm-stat-card__value">5 <small>/ 30 Tage</small></div>
+          <a class="adm-stat-card__link" href="meldungen.html?status=abgelehnt">Ansehen <i data-lucide="arrow-right" width="12" height="12"></i></a>
+        </div>
+        <div class="adm-stat-card">
+          <div class="adm-stat-card__label">Routen-Segmente <i data-lucide="route" width="14" height="14"></i></div>
+          <div class="adm-stat-card__value">35</div>
+          <a class="adm-stat-card__link" href="routes-placeholder.html">Ansehen <i data-lucide="arrow-right" width="12" height="12"></i></a>
+        </div>
+      </div>
+
+      <div class="adm-section-title">
+        <span>Neue Meldungen — zu prüfen</span>
+        <a href="meldungen.html?status=neu">Alle 12 anzeigen</a>
+      </div>
+
+      <div class="adm-table-wrap">
+        <div class="adm-queue">
+          <a class="adm-queue-row" href="meldung-detail.html?id=m-2041">
+            <span class="adm-queue-row__rating"><span class="adm-rate-pill" data-r="1">1</span></span>
+            <span class="adm-queue-row__body">
+              <span class="adm-queue-row__title">Velostreifen endet abrupt vor der Kreuzung ohne Übergang zur Strasse.</span>
+              <span class="adm-queue-row__meta">
+                <span><i data-lucide="map-pin" width="12" height="12"></i> Usterstrasse 12, Wetzikon</span>
+                <span><i data-lucide="clock" width="12" height="12"></i> vor 2 Std.</span>
+                <span><i data-lucide="user" width="12" height="12"></i> Anonym</span>
+              </span>
+            </span>
+            <i data-lucide="chevron-right" class="adm-queue-row__chev" width="18" height="18"></i>
+          </a>
+          <a class="adm-queue-row" href="meldung-detail.html?id=m-2040">
+            <span class="adm-queue-row__rating"><span class="adm-rate-pill" data-r="2">2</span></span>
+            <span class="adm-queue-row__body">
+              <span class="adm-queue-row__title">Abstellplätze am Bahnhof regelmässig überfüllt, viele Velos stehen wild.</span>
+              <span class="adm-queue-row__meta">
+                <span><i data-lucide="map-pin" width="12" height="12"></i> Bahnhofplatz, Wetzikon</span>
+                <span><i data-lucide="clock" width="12" height="12"></i> vor 5 Std.</span>
+                <span><i data-lucide="user" width="12" height="12"></i> Michael Frei</span>
+              </span>
+            </span>
+            <i data-lucide="chevron-right" class="adm-queue-row__chev" width="18" height="18"></i>
+          </a>
+          <a class="adm-queue-row" href="meldung-detail.html?id=m-2039">
+            <span class="adm-queue-row__rating"><span class="adm-rate-pill" data-r="3">3</span></span>
+            <span class="adm-queue-row__body">
+              <span class="adm-queue-row__title">Knoten Zürcherstrasse/Bahnhofstrasse unübersichtlich für Velofahrende.</span>
+              <span class="adm-queue-row__meta">
+                <span><i data-lucide="map-pin" width="12" height="12"></i> In der Nähe von Zürcherstrasse 4</span>
+                <span><i data-lucide="clock" width="12" height="12"></i> gestern</span>
+                <span><i data-lucide="user" width="12" height="12"></i> Anonym</span>
+              </span>
+            </span>
+            <i data-lucide="chevron-right" class="adm-queue-row__chev" width="18" height="18"></i>
+          </a>
+          <a class="adm-queue-row" href="meldung-detail.html?id=m-2038">
+            <span class="adm-queue-row__rating"><span class="adm-rate-pill" data-r="2">2</span></span>
+            <span class="adm-queue-row__body">
+              <span class="adm-queue-row__title">Schlechte Sicht bei Ausfahrt Gewerbestrasse, Sträucher verdecken Velowegs.</span>
+              <span class="adm-queue-row__meta">
+                <span><i data-lucide="map-pin" width="12" height="12"></i> Gewerbestrasse, Wetzikon</span>
+                <span><i data-lucide="clock" width="12" height="12"></i> gestern</span>
+                <span><i data-lucide="user" width="12" height="12"></i> R. Huber</span>
+              </span>
+            </span>
+            <i data-lucide="chevron-right" class="adm-queue-row__chev" width="18" height="18"></i>
+          </a>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="assets/admin.js"></script>
+</body>
+</html>

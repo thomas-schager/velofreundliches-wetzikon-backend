@@ -1,0 +1,623 @@
+openapi: 3.0.3
+info:
+  title: Velofreundliches Wetzikon — Backend API
+  version: 0.1.0
+  description: |
+    Public + admin API for the velofreundliches-wetzikon backend. Two kinds of consumers:
+
+    1. **Public, unauthenticated** — the Contao CMS site (`velofreundliches-wetzikon-contao`,
+       server-side fetch) and the standalone VeloMelder page (`public/additions/velo-melder.html`,
+       browser fetch) both read/write the *same* public endpoints below. There is no API key for
+       these: they replace what are static files today (`velo-routes.geojson`,
+       `velo-meldungen.json`), so anyone who could `curl` the old file can call the new endpoint —
+       that was already true and is not a regression.
+    2. **Admin, session-authenticated** — the admin backend's own UI (see `../design-prototype/`)
+       calls the `/admin/*` paths after a 2FA login. These are never called from the public site
+       or the public VeloMelder page.
+
+    Status model for a report ("Meldung" in the German-language UI — see
+    `../design-prototype/meldungen.html`/`meldung-detail.html`; naming here is English to match
+    the database schema, see `../database/schema.sql`): `pending_email_confirmation` → (email
+    link clicked) → `pending_review` → (admin decision) → `published` **or** `declined`. The
+    public `GET /reports` list only ever returns `published` entries. See
+    `../docs/api-implementation-strategy.md` for the reasoning behind this shape, and
+    `VeloWetzikon_Contao/velo-melder-data-contract.md` for the full field-by-field rationale this
+    spec is based on.
+
+    This file is the machine-readable source; open `index.html` in this folder for a rendered,
+    human-readable view (Swagger UI, loads this file directly — no build step).
+  contact:
+    name: Velofreundliches Wetzikon
+servers:
+  - url: https://api.velofreundliches-wetzikon.ch/v1
+    description: Production (proposed)
+  - url: http://localhost:8080/v1
+    description: Local development
+
+tags:
+  - name: Public — Reports
+    description: Anonymous submission and read access to VeloMelder reports.
+  - name: Public — Routes
+    description: Anonymous read access to Velonetz route data and its type/rating registries.
+  - name: Auth
+    description: Admin login, 2FA, and password reset. Session-cookie based.
+  - name: Admin — Reports
+    description: Moderation queue — requires an authenticated admin session.
+  - name: Admin — Routes
+    description: Route data editing — requires an authenticated admin session.
+
+paths:
+  # ---------------------------------------------------------------- PUBLIC: REPORTS
+  /reports:
+    get:
+      tags: [Public — Reports]
+      summary: List published reports
+      description: >
+        Replaces the static `velo-meldungen.json` fetch. Never includes `email` — published
+        entries carry no personal contact data at all.
+      parameters:
+        - name: bbox
+          in: query
+          description: "Optional bounding box filter: swLng,swLat,neLng,neLat"
+          schema: { type: string, example: "8.70,47.28,8.85,47.38" }
+        - name: rating
+          in: query
+          description: Filter to a single rating value (1-5).
+          schema: { type: integer, minimum: 1, maximum: 5 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PublicReport' }
+    post:
+      tags: [Public — Reports]
+      summary: Submit a new report
+      description: >
+        Starts the double-opt-in flow: the entry is created as `pending_email_confirmation` and
+        is **not** returned by `GET /reports` until the emailed confirmation link is clicked.
+        Anti-abuse (rate limiting, challenge/captcha token) is enforced server-side — see
+        `X-Challenge-Token` below. `id`, `createdAt`, `status`, and `anonymous` are always
+        server-assigned; any client-sent value for those fields is ignored.
+      parameters:
+        - name: X-Challenge-Token
+          in: header
+          required: true
+          description: >
+            Anti-spam challenge token (e.g. hCaptcha/Turnstile response, or an equivalent
+            server-issued proof-of-work token). Replaces today's client-only arithmetic captcha,
+            which provides no real protection. See docs/api-implementation-strategy.md §5.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/ReportSubmission' }
+      responses:
+        '202':
+          description: Accepted — confirmation email sent, entry not yet public.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, example: "m-2041" }
+                  status: { type: string, enum: [pending_email_confirmation] }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /reports/{id}:
+    get:
+      tags: [Public — Reports]
+      summary: Get a single published report
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicReport' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /reports/confirm/{token}:
+    get:
+      tags: [Public — Reports]
+      summary: Confirm a submission via the emailed link
+      description: >
+        Moves the entry from `pending_email_confirmation` to `pending_review` (into the admin
+        moderation queue). Does **not** publish it — an admin still has to approve it, see
+        `Admin — Reports`. Invalidates the token after use.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Confirmed — now awaiting moderation.
+        '404':
+          description: Unknown or already-used token.
+        '410':
+          description: Token expired.
+
+  # ---------------------------------------------------------------- PUBLIC: ROUTES
+  /routes:
+    get:
+      tags: [Public — Routes]
+      summary: Current Velonetz GeoJSON
+      description: Replaces the static `velo-routes.geojson` fetch. Same wire shape as today's file.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteFeatureCollection' }
+
+  /route-types:
+    get:
+      tags: [Public — Routes]
+      summary: The ROUTE_TYPES registry (key → label/color/weight/band styling)
+      description: >
+        Backend-owned copy of the registry currently hand-duplicated in every frontend file
+        (`velo-melder.html`, `velo-velonetz-embed-3.html`). Frontends should fetch this instead of
+        keeping a local copy — see data-contract §4, gap 8.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RouteType' }
+
+  /ratings:
+    get:
+      tags: [Public — Routes]
+      summary: The fixed 5-step report rating scale
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RatingDefinition' }
+
+  # ---------------------------------------------------------------- AUTH
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Step 1 — email + password
+      description: >
+        On success, emails a 6-digit code and returns a short-lived challenge token for step 2.
+        Does not yet establish a session. There is no separate username: admin accounts are
+        identified by email address only (matches how the code in step 2 is delivered).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        '200':
+          description: Credentials valid — code sent.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  challengeToken: { type: string, description: Opaque token, submit with the code in the next step. }
+                  maskedEmail: { type: string, example: "s•••••@velofreundliches-wetzikon.ch" }
+        '401':
+          description: Invalid email address or password.
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/login/verify:
+    post:
+      tags: [Auth]
+      summary: Step 2 — 6-digit email code
+      description: On success, establishes the admin session (sets an httpOnly session cookie).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challengeToken, code]
+              properties:
+                challengeToken: { type: string }
+                code: { type: string, pattern: '^[0-9]{6}$' }
+      responses:
+        '200':
+          description: Session established.
+          headers:
+            Set-Cookie:
+              schema: { type: string, example: "vw_admin_session=…; HttpOnly; Secure; SameSite=Strict" }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUser' }
+        '401':
+          description: Code incorrect or challenge token unknown.
+        '410':
+          description: Code expired — request a new one via /auth/login again.
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request a password-reset code
+      description: >
+        Always returns 200 regardless of whether the email address exists, to avoid revealing
+        which addresses have an account. If it exists, emails a 6-digit code (same mechanism as
+        login 2FA).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties: { email: { type: string, format: email } }
+      responses:
+        '200':
+          description: If the account exists, a code was sent.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  challengeToken: { type: string }
+
+  /auth/forgot-password/verify:
+    post:
+      tags: [Auth]
+      summary: Confirm the reset code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challengeToken, code]
+              properties:
+                challengeToken: { type: string }
+                code: { type: string, pattern: '^[0-9]{6}$' }
+      responses:
+        '200':
+          description: Code confirmed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resetToken: { type: string, description: Opaque, single-use, short-lived (e.g. 10 min). }
+        '401':
+          description: Code incorrect.
+        '410':
+          description: Code expired.
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Set a new password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resetToken, newPassword]
+              properties:
+                resetToken: { type: string }
+                newPassword: { type: string, format: password, minLength: 12 }
+      responses:
+        '200':
+          description: Password changed. Any existing sessions for this user are invalidated.
+        '400':
+          description: Password does not meet policy.
+        '401':
+          description: Reset token invalid, expired, or already used.
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: End the current admin session
+      security: [{ sessionAuth: [] }]
+      responses:
+        '204': { description: Logged out. }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Current admin user
+      security: [{ sessionAuth: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUser' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ---------------------------------------------------------------- ADMIN: REPORTS
+  /admin/reports:
+    get:
+      tags: [Admin — Reports]
+      summary: List reports in any status, including moderation-only fields
+      security: [{ sessionAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending_email_confirmation, pending_review, published, declined]
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AdminReport' }
+                  total: { type: integer }
+                  page: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /admin/reports/{id}:
+    get:
+      tags: [Admin — Reports]
+      summary: Get one report with moderation-only fields (email, status, timestamps)
+      security: [{ sessionAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminReport' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Admin — Reports]
+      summary: Edit fields and/or change moderation status
+      description: >
+        A single endpoint for both "correct a value before publishing" and "publish/decline" —
+        the admin UI (`design-prototype/meldung-detail.html`) uses this for its Speichern,
+        Veröffentlichen, and Ablehnen actions alike, just with a different body. See
+        `docs/api-implementation-strategy.md` §3 for why this must run through one service-layer
+        method (`ReportModerationService`) no matter which admin UI action triggered it.
+      security: [{ sessionAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+        - name: If-Match
+          in: header
+          required: true
+          description: >
+            The report's current `version` value (optimistic locking — see strategy doc §4).
+            Request is rejected with 409 if it doesn't match the current stored version.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminReportPatch' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminReport' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Version conflict — another admin changed this report first. Re-fetch and retry.
+    delete:
+      tags: [Admin — Reports]
+      summary: Permanently delete a report (e.g. GDPR erasure request)
+      security: [{ sessionAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------- ADMIN: ROUTES
+  /admin/routes:
+    put:
+      tags: [Admin — Routes]
+      summary: Replace the full Velonetz GeoJSON
+      description: >
+        Full-replace, matching today's "download from the editor, re-upload by hand" workflow —
+        the editor UI keeps its exact current drawing/editing behavior and just calls this instead
+        of exporting a file. See data-contract §3.3. Route edit history/versioning is explicitly
+        out of scope for v1 (see strategy doc §6).
+      security: [{ sessionAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RouteFeatureCollection' }
+      responses:
+        '200':
+          description: Replaced.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteFeatureCollection' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+components:
+  parameters:
+    ReportId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, example: "m-2041" }
+
+  responses:
+    ValidationError:
+      description: Request body failed validation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: No valid admin session.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: No resource with that id.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Too many requests from this client.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  securitySchemes:
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: vw_admin_session
+      description: >
+        httpOnly, Secure, SameSite=Strict session cookie set by /auth/login/verify. No API keys
+        or bearer tokens for admin endpoints — see docs/api-implementation-strategy.md §2 for why
+        session-cookie auth was chosen over a token-based scheme for this use case.
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        message: { type: string }
+
+    PublicReport:
+      type: object
+      description: Never includes `email` — see the VeloMelder data contract §2.6.
+      properties:
+        id: { type: string, example: "m-1001" }
+        lat: { type: number, format: float }
+        lng: { type: number, format: float }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        comment: { type: string }
+        photos: { type: array, items: { type: string, format: uri } }
+        name: { type: string, nullable: true }
+        anonymous: { type: boolean }
+        address: { type: string, nullable: true }
+        addressDistanceM: { type: number, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    AdminReport:
+      allOf:
+        - $ref: '#/components/schemas/PublicReport'
+        - type: object
+          properties:
+            email: { type: string, format: email, description: "Moderation-only. Never present in PublicReport." }
+            emailConfirmed: { type: boolean }
+            status: { type: string, enum: [pending_email_confirmation, pending_review, published, declined] }
+            version: { type: integer, description: Optimistic-locking counter, use as If-Match on PATCH. }
+            moderatedBy: { type: string, nullable: true, description: Admin email who last changed status. }
+            moderatedAt: { type: string, format: date-time, nullable: true }
+
+    AdminReportPatch:
+      type: object
+      description: All fields optional — send only what changed.
+      properties:
+        lat: { type: number }
+        lng: { type: number }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        comment: { type: string }
+        name: { type: string }
+        anonymous: { type: boolean }
+        status: { type: string, enum: [published, declined] }
+        internalNote: { type: string, description: Moderation-only free-text note, never exposed publicly. }
+
+    ReportSubmission:
+      type: object
+      required: [lat, lng, rating, comment, email]
+      properties:
+        lat: { type: number }
+        lng: { type: number }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        comment: { type: string, minLength: 10, maxLength: 2000 }
+        name: { type: string, description: Optional. Empty/absent means the entry displays as anonymous. }
+        email:
+          type: string
+          format: email
+          description: Required for the confirmation link. Never returned by any public or admin-list response body beyond AdminReport.
+        photos:
+          type: array
+          items: { type: string, format: binary }
+          maxItems: 5
+          description: Real file uploads (multipart), not base64 — max count/size enforced server-side.
+
+    RouteFeatureCollection:
+      type: object
+      properties:
+        type: { type: string, enum: [FeatureCollection] }
+        features:
+          type: array
+          items: { $ref: '#/components/schemas/RouteFeature' }
+
+    RouteFeature:
+      type: object
+      properties:
+        type: { type: string, enum: [Feature] }
+        geometry:
+          type: object
+          properties:
+            type: { type: string, enum: [LineString] }
+            coordinates:
+              type: array
+              items:
+                type: array
+                items: { type: number }
+                minItems: 2
+                maxItems: 2
+        properties:
+          type: object
+          required: [type]
+          properties:
+            type: { type: string, description: "Key into the ROUTE_TYPES registry, e.g. 'vorschlag-gelbes-band'." }
+            direction: { type: string, enum: [one-way, both-ways], description: "Only present for non-band, direction-aware types." }
+
+    RouteType:
+      type: object
+      properties:
+        key: { type: string, example: "vorschlag-gelbes-band" }
+        label: { type: string, example: "Vorschlag gelbes Band" }
+        color: { type: string, example: "#ca8a04" }
+        weight: { type: number }
+        band: { type: boolean }
+        bandStyle: { type: string, enum: [plain, outlined, narrow], nullable: true }
+        noDirection: { type: boolean }
+
+    RatingDefinition:
+      type: object
+      properties:
+        rating: { type: integer }
+        label: { type: string, example: "Gefährlich" }
+        color: { type: string, example: "#b91c1c" }
+
+    AdminUser:
+      type: object
+      properties:
+        email: { type: string, format: email }
+        displayName: { type: string }
+        role: { type: string, example: "Redaktion", description: "Not shown in the admin UI's top navigation (see design-prototype/), but still tracked for authorization." }
