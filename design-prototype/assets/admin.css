@@ -234,10 +234,36 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
 @media (max-width: 860px) { .adm-topbar__burger { display: block; } }
 .adm-topbar__title { font: 600 18px var(--font-display); }
 .adm-topbar__spacer { flex: 1; }
-.adm-topbar__user { display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 6px 8px; border-radius: var(--radius-sm); }
+.adm-user-menu { position: relative; }
+.adm-topbar__user { display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 6px 8px; border-radius: var(--radius-sm); background: none; border: none; font: inherit; color: inherit; }
 .adm-topbar__user:hover { background: var(--color-surface-2); }
 .adm-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--color-primary); color: #fff; display: flex; align-items: center; justify-content: center; font: 600 13px var(--font-display); flex-shrink: 0; }
 .adm-topbar__user-name { font: 500 13px var(--font-body); }
+.adm-user-menu__chevron { transition: transform var(--dur) var(--ease); }
+.adm-user-menu.is-open .adm-user-menu__chevron { transform: rotate(180deg); }
+
+.adm-user-menu__dropdown {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 1100; min-width: 220px;
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg); padding: 6px; opacity: 0; visibility: hidden; transform: translateY(-4px);
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease), visibility var(--dur);
+}
+.adm-user-menu.is-open .adm-user-menu__dropdown { opacity: 1; visibility: visible; transform: translateY(0); }
+.adm-user-menu__email {
+  padding: 8px 10px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--color-border);
+  font: 400 12px var(--font-body); color: var(--color-muted); word-break: break-all;
+}
+.adm-user-menu__item {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 10px; border-radius: var(--radius-sm);
+  background: none; border: none; font: 500 13px var(--font-body); color: var(--color-text); cursor: pointer; text-align: left;
+}
+.adm-user-menu__item:hover { background: var(--color-surface-2); }
+.adm-user-menu__item i { color: var(--color-muted); flex-shrink: 0; }
+
+@media (max-width: 640px) {
+  .adm-topbar__user-name { display: none; }
+  .adm-user-menu__dropdown { right: 0; left: auto; }
+}
 
 .adm-main { flex: 1; padding: var(--space-6); max-width: 1320px; width: 100%; margin: 0 auto; }
 @media (min-width: 600px) { .adm-main { padding: var(--space-7); } }

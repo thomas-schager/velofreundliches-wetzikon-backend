@@ -46,14 +46,37 @@
       if (link) link.classList.add('is-active');
     }
 
-    /* ---- Topbar user menu: real logout (POST /auth/logout, then back to /login) ---- */
+    /* ---- Topbar user menu: click to expand, "Abmelden" triggers the real logout
+       (POST /auth/logout, then back to /login) -- clicking the menu itself must NOT log out. */
     var userMenu = document.getElementById('admUserMenu');
-    if (userMenu) {
-      userMenu.addEventListener('click', function () {
-        fetch('/auth/logout', { method: 'POST' }).finally(function () {
-          window.location.href = '/login';
-        });
+    var userMenuTrigger = document.getElementById('admUserMenuTrigger');
+    var logoutBtn = document.getElementById('admLogoutBtn');
+    if (userMenu && userMenuTrigger) {
+      function closeUserMenu() {
+        userMenu.classList.remove('is-open');
+        userMenuTrigger.setAttribute('aria-expanded', 'false');
+      }
+      function toggleUserMenu() {
+        var open = userMenu.classList.toggle('is-open');
+        userMenuTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+      userMenuTrigger.addEventListener('click', function (e) {
+        e.stopPropagation();
+        toggleUserMenu();
       });
+      document.addEventListener('click', function (e) {
+        if (!userMenu.contains(e.target)) closeUserMenu();
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeUserMenu();
+      });
+      if (logoutBtn) {
+        logoutBtn.addEventListener('click', function () {
+          fetch('/auth/logout', { method: 'POST' }).finally(function () {
+            window.location.href = '/login';
+          });
+        });
+      }
     }
   });
 })();

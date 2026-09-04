@@ -95,8 +95,13 @@ To run it locally:
 
 ```bash
 docker start velowetzikon-backend-mariadb   # start the DB (see DATABASE.md if the container doesn't exist yet)
-php -S localhost:8001 -t app/public app/public/index.php
+cd app && php -S localhost:8001 -t public router.php
 ```
+
+(`router.php`, not `public/index.php`, as the router argument — PHP's built-in server hands *every*
+request to an explicit router script, including ones for files that already exist on disk;
+`router.php` lets it serve real static assets — CSS/JS — directly and only falls through to
+Symfony for actual routes. Passing `public/index.php` itself as the router breaks asset loading.)
 
 Then open `http://localhost:8001/login`. A seeded test admin account exists for local login —
 see `app/README.md`-equivalent notes below (credentials aren't committed to this file; they were
@@ -107,9 +112,13 @@ Deliberately simplified for this local-dev-only pass (documented here rather tha
 - **Anti-abuse** on `POST /reports` (`X-Challenge-Token`) is accepted but not verified — any
   value is treated as valid, per the task's explicit scope. Real hCaptcha/Turnstile verification
   is future work (see `docs/api-implementation-strategy.md` §5).
-- **2FA codes aren't emailed** (no SMTP configured locally) — they're logged via Monolog
-  (`app/var/log/dev.log`) and, in the `dev` environment only, shown directly on the verify page
-  as a labelled "Dev-Modus" banner so login is actually completable without email.
+- **Emails are real but plain text** — login/reset 2FA codes, the password-changed notice, and
+  the VeloMelder submission confirmation link all send via a real SMTP account (Hostpoint,
+  `MAILER_DSN` in `app/.env.local`, not committed). No HTML templates/branded copy yet — see
+  `app/src/Service/AuthService.php` and `app/src/Service/ReportSubmissionService.php`. As a
+  local-dev convenience only, the 2FA code is also logged via Monolog (`app/var/log/dev.log`) and,
+  in the `dev` environment only, shown directly on the verify page as a "Dev-Modus" fallback in
+  case a mail doesn't arrive.
 - **The route editor** (`PUT /admin/routes`) is not implemented — `/routen` stays a stub page, per
   README's "What's intentionally not designed yet" below (unchanged scope decision).
 - Reverse-geocoded `address`/`addressDistanceM` on submitted reports are always `null` — no

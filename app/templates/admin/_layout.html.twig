@@ -49,10 +49,25 @@
       <button class="adm-topbar__burger" id="admBurger"><i data-lucide="menu"></i></button>
       <span class="adm-topbar__title">{% block topbar_title %}{% endblock %}</span>
       <span class="adm-topbar__spacer"></span>
-      <div class="adm-topbar__user" id="admUserMenu">
-        <span class="adm-avatar">{{ admin_initials|default('--') }}</span>
-        <span class="adm-topbar__user-name">{{ admin_display_name|default('') }}</span>
-        <i data-lucide="chevron-down" width="14" height="14" style="color:var(--color-muted);"></i>
+      {% set admin_name = app.user ? app.user.displayName : '' %}
+      {% set admin_initials = '' %}
+      {% for part in admin_name|split(' ') %}
+        {% if part is not empty and admin_initials|length < 2 %}
+          {% set admin_initials = admin_initials ~ (part|first|upper) %}
+        {% endif %}
+      {% endfor %}
+      <div class="adm-user-menu" id="admUserMenu">
+        <button type="button" class="adm-topbar__user" id="admUserMenuTrigger" aria-haspopup="true" aria-expanded="false">
+          <span class="adm-avatar">{{ admin_initials|default('--') }}</span>
+          <span class="adm-topbar__user-name">{{ admin_name }}</span>
+          <i data-lucide="chevron-down" width="14" height="14" class="adm-user-menu__chevron"></i>
+        </button>
+        <div class="adm-user-menu__dropdown" id="admUserMenuDropdown">
+          {% if app.user %}<div class="adm-user-menu__email">{{ app.user.email }}</div>{% endif %}
+          <button type="button" class="adm-user-menu__item" id="admLogoutBtn">
+            <i data-lucide="log-out" width="15" height="15"></i> Abmelden
+          </button>
+        </div>
       </div>
     </header>
 

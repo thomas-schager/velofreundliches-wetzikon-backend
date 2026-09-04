@@ -52,10 +52,18 @@
       <button class="adm-topbar__burger" id="admBurger"><i data-lucide="menu"></i></button>
       <span class="adm-topbar__title">Meldung prüfen</span>
       <span class="adm-topbar__spacer"></span>
-      <div class="adm-topbar__user" id="admUserMenu">
-        <span class="adm-avatar">SM</span>
-        <span class="adm-topbar__user-name">Sara Meier</span>
-        <i data-lucide="chevron-down" width="14" height="14" style="color:var(--color-muted);"></i>
+      <div class="adm-user-menu" id="admUserMenu">
+        <button type="button" class="adm-topbar__user" id="admUserMenuTrigger" aria-haspopup="true" aria-expanded="false">
+          <span class="adm-avatar">SM</span>
+          <span class="adm-topbar__user-name">Sara Meier</span>
+          <i data-lucide="chevron-down" width="14" height="14" class="adm-user-menu__chevron"></i>
+        </button>
+        <div class="adm-user-menu__dropdown" id="admUserMenuDropdown">
+          <div class="adm-user-menu__email">s.meier@velofreundliches-wetzikon.ch</div>
+          <button type="button" class="adm-user-menu__item" id="admLogoutBtn">
+            <i data-lucide="log-out" width="15" height="15"></i> Abmelden
+          </button>
+        </div>
       </div>
     </header>
 

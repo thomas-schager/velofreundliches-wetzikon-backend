@@ -44,7 +44,7 @@
       {% if dev_code %}
       <div class="adm-alert" style="background:#fff7e6;border:1px dashed #ca8a04;color:#7a5b00;">
         <i data-lucide="flask-conical" width="16" height="16"></i>
-        <span>Dev-Modus: Code lautet <strong>{{ dev_code }}</strong> (kein SMTP lokal konfiguriert — auch in <code>var/log/dev.log</code> protokolliert).</span>
+        <span>Dev-Modus: Code lautet <strong>{{ dev_code }}</strong> (wurde auch per E-Mail verschickt — dies ist nur ein lokaler Fallback, falls die Mail nicht ankommt; auch in <code>var/log/dev.log</code> protokolliert).</span>
       </div>
       {% endif %}
 

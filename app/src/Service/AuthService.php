@@ -25,9 +25,11 @@ use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
  * that same API -- see docs/api-implementation-strategy.md §3.1 for why this must be one code
  * path per business action.
  *
- * Dev-only simplification (no real SMTP configured locally): the 6-digit code is always logged
- * via Monolog, and this service also returns the plaintext code so callers can surface a
- * "Dev-Modus" banner -- see AuthController / templates/auth/verify.html.twig.
+ * Emails are real (see MAILER_DSN in .env.local -- Hostpoint SMTP) but deliberately plain text
+ * for now, no HTML/branded templates yet (see README.md's Status section). The 6-digit code is
+ * additionally logged via Monolog in dev, and this service returns the plaintext code so the
+ * verify page's dev-mode banner still works as a local-testing fallback -- see AuthController /
+ * templates/auth/verify.html.twig.
  */
 class AuthService
 {
@@ -148,6 +150,8 @@ class AuthService
         $challenge->setResetToken(null);
 
         $this->em->flush();
+
+        $this->sendPasswordChangedEmail($user->getEmail());
     }
 
     /**
@@ -167,29 +171,64 @@ class AuthService
         $this->em->flush();
 
         if ($user !== null) {
-            $this->sendCodeEmail($user->getEmail(), $code);
+            $this->sendCodeEmail($user->getEmail(), $code, $purpose);
         }
 
         return [$challenge, $code];
     }
 
     /**
-     * Actually routes through Symfony Mailer (MAILER_DSN=null://null locally -- no SMTP
-     * configured, see README.md's Status section). The code itself reaches the developer via
-     * Monolog + the dev-mode verify-page banner (see requestLoginChallenge/requestPasswordReset
-     * callers) since the null transport swallows the message; this call exists so a real
-     * MAILER_DSN can be dropped in later without any other code changing.
+     * Plain-text only for now (see class docblock). Subject/body differ by purpose so a login
+     * code and a password-reset code are never visually interchangeable in an inbox -- someone
+     * who didn't request a password reset should immediately recognise the mail as wrong.
      */
-    private function sendCodeEmail(string $to, string $code): void
+    private function sendCodeEmail(string $to, string $code, string $purpose): void
+    {
+        if ($purpose === AuthChallenge::PURPOSE_PASSWORD_RESET) {
+            $subject = 'Code zum Zurücksetzen des Passworts';
+            $body = "Sie haben ein neues Passwort für Ihr Konto im Velofreundliches-Wetzikon-Backend angefordert.\n\n"
+                . "Ihr 6-stelliger Code lautet: {$code}\n"
+                . "Gültig für " . self::CHALLENGE_TTL_MINUTES . " Minuten.\n\n"
+                . "Falls Sie dies nicht angefordert haben, ignorieren Sie diese E-Mail -- Ihr Passwort bleibt unverändert.\n\n"
+                . "Velofreundliches Wetzikon";
+        } else {
+            $subject = 'Ihr Anmeldecode';
+            $body = "Jemand hat versucht, sich mit Ihrer E-Mail-Adresse im Velofreundliches-Wetzikon-Backend anzumelden.\n\n"
+                . "Ihr 6-stelliger Code lautet: {$code}\n"
+                . "Gültig für " . self::CHALLENGE_TTL_MINUTES . " Minuten.\n\n"
+                . "Falls Sie dies nicht waren, können Sie diese E-Mail ignorieren -- ohne den Code kann sich niemand anmelden.\n\n"
+                . "Velofreundliches Wetzikon";
+        }
+
+        try {
+            $this->mailer->send((new Email())
+                ->from('notifications@velofreundliches-wetzikon.ch')
+                ->to($to)
+                ->subject($subject)
+                ->text($body));
+        } catch (TransportExceptionInterface $e) {
+            $this->logger->warning('Could not send 2FA code email', ['exception' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Security notice, not part of any flow's happy-path return value -- fire-and-forget, same
+     * "don't let mail delivery break the request" handling as sendCodeEmail.
+     */
+    private function sendPasswordChangedEmail(string $to): void
     {
         try {
             $this->mailer->send((new Email())
-                ->from('no-reply@velofreundliches-wetzikon.ch')
+                ->from('notifications@velofreundliches-wetzikon.ch')
                 ->to($to)
-                ->subject('Ihr Bestätigungscode')
-                ->text("Ihr 6-stelliger Code lautet: {$code}\nGültig für 10 Minuten."));
+                ->subject('Ihr Passwort wurde geändert')
+                ->text(
+                    "Das Passwort für Ihr Konto im Velofreundliches-Wetzikon-Backend wurde soeben geändert.\n\n"
+                    . "Falls Sie das nicht waren, kontaktieren Sie umgehend die Redaktion.\n\n"
+                    . "Velofreundliches Wetzikon"
+                ));
         } catch (TransportExceptionInterface $e) {
-            $this->logger->warning('Could not send 2FA code email', ['exception' => $e->getMessage()]);
+            $this->logger->warning('Could not send password-changed notice email', ['exception' => $e->getMessage()]);
         }
     }
 
