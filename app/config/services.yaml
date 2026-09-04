@@ -8,6 +8,15 @@
 # https://symfony.com/doc/current/best_practices.html#use-parameters-for-application-configuration
 parameters:
     app.uploads_dir: '%kernel.project_dir%/public/uploads'
+    # Not web-served, not committed (var/ is gitignored) -- pre-save GeoJSON snapshots of the
+    # route network, see App\Entity\RouteBackup / RouteEditingService::save().
+    app.route_backups_dir: '%kernel.project_dir%/var/route-backups'
+    # Automated-test-only 2FA/reset-email bypass -- see AuthService::createChallenge(). Empty
+    # unless set in .env.local, so it can never accidentally match in an environment that hasn't
+    # deliberately opted in.
+    app.test_bypass_token: '%env(APP_TEST_BYPASS_TOKEN)%'
+    # Not web-served, not committed -- see AuthService's use of this parameter.
+    app.test_bypass_file: '%kernel.project_dir%/var/test-2fa-code.txt'
 
 services:
     # default configuration for services in *this* file
@@ -17,6 +26,9 @@ services:
         bind:
             string $environment: '%kernel.environment%'
             string $uploadsDir: '%app.uploads_dir%'
+            string $routeBackupsDir: '%app.route_backups_dir%'
+            string $testBypassToken: '%app.test_bypass_token%'
+            string $testBypassFile: '%app.test_bypass_file%'
 
     # makes classes in src/ available to be used as services
     # this creates a service per class whose id is the fully-qualified class name

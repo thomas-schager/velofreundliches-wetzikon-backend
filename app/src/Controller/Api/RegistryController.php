@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 use App\Repository\RatingRepository;
 use App\Repository\RouteFeatureRepository;
 use App\Repository\RouteTypeRepository;
+use App\Service\RouteFeaturePresenter;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Attribute\Route;
 
@@ -52,25 +53,6 @@ class RegistryController extends AbstractApiController
     #[Route('/routes', name: 'api_routes_list', methods: ['GET'])]
     public function routes(): JsonResponse
     {
-        $features = array_map(static function ($f) {
-            $properties = ['type' => $f->getRouteType()->getKey()];
-            if ($f->getDirection() !== null) {
-                $properties['direction'] = $f->getDirection();
-            }
-
-            return [
-                'type' => 'Feature',
-                'geometry' => [
-                    'type' => 'LineString',
-                    'coordinates' => $f->getCoordinates(),
-                ],
-                'properties' => $properties,
-            ];
-        }, $this->routeFeatures->findAll());
-
-        return new JsonResponse([
-            'type' => 'FeatureCollection',
-            'features' => $features,
-        ]);
+        return new JsonResponse(RouteFeaturePresenter::toFeatureCollection($this->routeFeatures->findAll()));
     }
 }

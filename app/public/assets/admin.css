@@ -267,6 +267,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
 
 .adm-main { flex: 1; padding: var(--space-6); max-width: 1320px; width: 100%; margin: 0 auto; }
 @media (min-width: 600px) { .adm-main { padding: var(--space-7); } }
+/* Opt-out for pages whose content (e.g. the route editor's map) benefits from the full content
+   width instead of the shared 1320px reading-width cap every other admin page uses. */
+.adm-main--full { max-width: none; }
 .adm-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: var(--space-6); flex-wrap: wrap; }
 .adm-page-head h1 { font: 600 24px var(--font-display); margin-bottom: 4px; }
 .adm-page-head p { color: var(--color-text-muted); font-size: 14px; }
@@ -424,3 +427,162 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
 .adm-empty svg { color: var(--color-border-strong); margin-bottom: 16px; }
 .adm-empty h3 { font: 600 16px var(--font-display); color: var(--color-text); margin-bottom: 6px; }
 .adm-empty p { font-size: 14px; max-width: 380px; margin: 0 auto; }
+
+/* ============================================================
+   ROUTE EDITOR
+   Map look & feel vendored from velofreundliches-wetzikon-design-system's design-system/map.html
+   (canonical reference: velo-melder.html's editor in velofreundliches-wetzikon-contao) -- tile
+   layers, toggle control and pin styling already added under MELDUNG DETAIL above (.map-toggle,
+   .map-toggle-btn, .custom-pin, .leaflet-popup-close-button) are reused here unchanged. The
+   editor-panel/type-pill/legend styling below is adapted from velo-melder.html's own edit-mode
+   CSS (--vw-* tokens there, swapped for --color-* / --radius-* / --shadow-* here), not reinvented.
+   ============================================================ */
+/* Three columns: narrow editor | map (takes the rest) | narrow version history. All three share
+   one height so they read as one panel, each side column scrolling independently if its content
+   is taller than the map. */
+.adm-routes-layout { display: flex; gap: 16px; height: calc(100vh - 300px); min-height: 520px; align-items: stretch; }
+.adm-routes-col { flex: 0 0 240px; min-width: 0; background: #fff; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow-y: auto; overflow-x: hidden; }
+.adm-routes-col--backups { flex-basis: 280px; }
+
+.adm-route-map-wrap { position: relative; flex: 1 1 auto; min-width: 0; height: 100%; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--color-border); }
+#routesMap { width: 100%; height: 100%; background: var(--color-surface-2); }
+#routesMap.is-drawing, #routesMap.is-editing { cursor: crosshair; }
+
+@media (max-width: 1080px) {
+  .adm-routes-layout { flex-direction: column; height: auto; }
+  .adm-routes-col { flex-basis: auto; max-height: 320px; }
+  .adm-route-map-wrap { height: 480px; }
+}
+
+.adm-route-legend {
+  /* bottom-right, not bottom-left -- the editor panel is tall (10 route types) and anchors
+     top/left, so a left-anchored legend can end up hidden behind it on the admin shell's
+     shorter map height (less vertical room than velo-melder.html's own near-fullscreen map). */
+  display: none; position: absolute; bottom: 12px; right: 12px; z-index: 1000; flex-direction: column;
+  background: rgba(255,255,255,0.96); border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm);
+  padding: 8px 10px; font: 400 12px var(--font-body); color: var(--color-text); box-shadow: var(--shadow-sm); min-width: 190px;
+  max-height: calc(100% - 24px); overflow-y: auto;
+}
+.adm-route-legend.visible { display: flex; }
+.adm-route-legend__title { font: 700 11px var(--font-body); text-transform: uppercase; letter-spacing: 0.07em; color: var(--color-muted); margin-bottom: 7px; }
+.adm-route-legend-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; user-select: none; }
+.adm-route-legend-row + .adm-route-legend-row { border-top: 1px solid var(--color-border); margin-top: 3px; padding-top: 5px; }
+.adm-route-legend-row:hover { opacity: 0.75; }
+.adm-route-legend-row--hidden { opacity: 0.35; }
+.adm-route-legend-row--hidden span { text-decoration: line-through; }
+.adm-route-legend-line { width: 20px; height: 4px; border-radius: 2px; flex-shrink: 0; }
+.adm-route-legend-line--dashed { background: repeating-linear-gradient(90deg, currentColor 0 8px, transparent 8px 13px); height: 3px; }
+.adm-route-legend-line--band { width: 20px; height: 8px; border-radius: 3px; opacity: 0.55; flex-shrink: 0; }
+.adm-route-legend-line--band-outlined { width: 20px; height: 8px; border-radius: 3px; background: #fff; border: 2px solid #64449b; flex-shrink: 0; box-sizing: border-box; }
+.adm-route-legend-line--band-narrow { width: 20px; height: 4px; border-radius: 2px; opacity: 0.75; flex-shrink: 0; }
+.adm-route-legend-line--band-scaled { width: 20px; height: 6px; border-radius: 3px; opacity: 0.65; flex-shrink: 0; }
+
+/* Lives inside .adm-routes-col--editor, which already provides the card chrome (border/bg/
+   radius/scroll) shared with .adm-routes-col--backups -- this is structural only, no longer a
+   floating overlay on the map. */
+.adm-editor-panel { font-family: var(--font-body); font-size: 13px; color: var(--color-text); }
+.adm-editor-panel__head { background: var(--color-secondary); color: #fff; font: 700 11px var(--font-body); text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 10px; }
+.adm-editor-section { padding: 10px; border-bottom: 1px solid var(--color-border); }
+.adm-editor-section:last-child { border-bottom: none; }
+.adm-editor-section-label { font: 700 10px var(--font-body); text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-muted); margin-bottom: 7px; }
+.adm-type-pills { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.adm-type-pill {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-sm);
+  border: 1.5px solid var(--color-border); background: var(--color-surface); cursor: pointer;
+  font: 400 12px var(--font-body); color: var(--color-text); text-align: left;
+  transition: border-color var(--dur) var(--ease), background var(--dur);
+}
+.adm-type-pill:hover { background: var(--color-surface-2); }
+.adm-type-pill.is-active { border-color: var(--active-color, var(--color-border-strong)); background: var(--color-surface-2); font-weight: 500; }
+.adm-type-pill-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.adm-type-pill-dot--band { width: 18px; height: 8px; border-radius: 3px; }
+.adm-type-pill-dot--band-outlined { width: 18px; height: 8px; border-radius: 3px; background: #fff; border: 2.5px solid #64449b; box-sizing: border-box; }
+.adm-type-pill-dot--band-narrow { width: 18px; height: 4px; border-radius: 2px; }
+
+.adm-dir-options { display: flex; flex-direction: column; gap: 5px; }
+.adm-dir-opt { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--color-text); cursor: pointer; padding: 2px 0; }
+.adm-dir-opt input { accent-color: var(--color-primary); cursor: pointer; margin: 0; }
+
+.adm-editor-actions { display: flex; flex-direction: column; gap: 5px; }
+.adm-editor-btn {
+  width: 100%; padding: 7px 10px; min-height: 34px; border-radius: var(--radius-sm); border: 1px solid var(--color-border-strong);
+  background: var(--color-surface); color: var(--color-text); font: 500 12px var(--font-body); cursor: pointer; text-align: left;
+  display: flex; align-items: center; gap: 7px; transition: background var(--dur) var(--ease), border-color var(--dur);
+}
+.adm-editor-btn:hover { background: var(--color-surface-2); border-color: var(--color-secondary); }
+.adm-editor-btn.is-active { background: var(--color-secondary); color: #fff; border-color: var(--color-secondary); }
+.adm-editor-btn--danger { color: var(--color-danger); }
+.adm-editor-btn--danger:hover { background: var(--color-primary-tint); border-color: var(--color-danger); }
+.adm-editor-hint { padding: 0 10px 8px; font-size: 11px; color: var(--color-muted); line-height: 1.45; display: none; }
+.adm-editor-hint.visible { display: block; }
+
+.adm-wp-marker { position: relative; }
+.adm-wp-label {
+  position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); background: rgba(20,20,20,0.82); color: #fff;
+  font-family: monospace; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px; white-space: nowrap;
+  line-height: 1.5; pointer-events: none;
+}
+
+/* Change-summary confirm modal, shown by "Speichern" before PUT /admin/routes actually fires */
+.adm-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 2000; display: flex; align-items: center;
+  justify-content: center; padding: 20px; opacity: 0; pointer-events: none; transition: opacity var(--dur) var(--ease);
+}
+.adm-modal-overlay.open { opacity: 1; pointer-events: all; }
+.adm-modal {
+  background: #fff; border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); width: 100%; max-width: 560px;
+  max-height: 84vh; display: flex; flex-direction: column; overflow: hidden;
+}
+.adm-modal__head { padding: 20px 24px 16px; border-bottom: 1px solid var(--color-border); }
+.adm-modal__head h2 { font: 600 18px var(--font-display); margin-bottom: 4px; }
+.adm-modal__head p { font-size: 13px; color: var(--color-text-muted); }
+.adm-modal__body { padding: 16px 24px; overflow-y: auto; flex: 1; }
+.adm-modal__foot { padding: 14px 24px; border-top: 1px solid var(--color-border); display: flex; justify-content: flex-end; gap: 10px; }
+
+.adm-changelist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.adm-changelist li { display: flex; gap: 10px; align-items: flex-start; font: 400 13px/1.5 var(--font-body); padding: 8px 10px; border-radius: var(--radius-sm); background: var(--color-surface-2); }
+.adm-changelist__icon { flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-top: 1px; }
+.adm-changelist li[data-action="added"] .adm-changelist__icon { background: var(--color-success-tint); color: var(--color-success-dark); }
+.adm-changelist li[data-action="removed"] .adm-changelist__icon { background: var(--color-primary-tint); color: var(--color-danger); }
+.adm-changelist li[data-action="modified"] .adm-changelist__icon { background: #fff4e5; color: #8a5a00; }
+.adm-changelist__icon svg { width: 11px; height: 11px; }
+
+/* Backups (version history) column -- lives inside .adm-routes-col--backups, same card chrome
+   as .adm-editor-panel's column. Each version is a collapsed row by default -- reusing the same
+   trigger+rotating-chevron pattern already established for .adm-user-menu and .adm-collapse-btn
+   elsewhere in this file, not a new interaction invented for this one spot -- that expands to
+   reveal its change list (.adm-changelist, shared with the confirm-save modal) only once opened. */
+.adm-backups-panel__note { padding: 10px 10px 4px; font-size: 11px; color: var(--color-muted); line-height: 1.5; }
+.adm-backups-list { padding: 4px 0 10px; }
+.adm-backup-row { border-bottom: 1px solid var(--color-border); }
+.adm-backup-row:last-child { border-bottom: none; }
+
+.adm-backup-row__trigger {
+  width: 100%; display: flex; align-items: flex-start; gap: 8px; padding: 10px; border: none; background: none;
+  cursor: pointer; text-align: left; font-family: var(--font-body); color: inherit;
+}
+.adm-backup-row__trigger:hover { background: var(--color-surface-2); }
+.adm-backup-row__main { flex: 1; min-width: 0; }
+.adm-backup-row__time { font: 600 13px var(--font-body); color: var(--color-text); }
+.adm-backup-row__by { font-size: 11px; color: var(--color-muted); margin-top: 1px; }
+.adm-backup-row__label { display: inline-block; margin-top: 4px; font: 500 11px var(--font-body); color: var(--color-secondary); background: var(--color-surface-2); border-radius: 999px; padding: 2px 8px; }
+.adm-backup-row__counts { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.adm-backup-count { font: 600 10px/1.6 var(--font-body); border-radius: 999px; padding: 1px 7px; }
+.adm-backup-count--added { background: var(--color-success-tint); color: var(--color-success-dark); }
+.adm-backup-count--removed { background: var(--color-primary-tint); color: var(--color-danger); }
+.adm-backup-count--modified { background: #fff4e5; color: #8a5a00; }
+.adm-backup-row__chevron { flex-shrink: 0; margin-top: 3px; color: var(--color-muted); transition: transform var(--dur) var(--ease); }
+.adm-backup-row.is-expanded .adm-backup-row__chevron { transform: rotate(180deg); }
+
+.adm-backup-row__details { display: none; padding: 0 10px 12px; }
+.adm-backup-row.is-expanded .adm-backup-row__details { display: block; }
+.adm-backup-row__details .adm-changelist { margin-bottom: 10px; }
+.adm-backup-row__details .adm-changelist li { font-size: 12px; padding: 6px 8px; }
+
+.adm-toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); z-index: 3000;
+  background: var(--color-secondary); color: #fff; padding: 10px 18px; border-radius: var(--radius-sm);
+  font: 500 13px var(--font-body); box-shadow: var(--shadow-lg); opacity: 0; pointer-events: none;
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.adm-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }

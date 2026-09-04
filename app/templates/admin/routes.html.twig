@@ -1,0 +1,104 @@
+{% extends 'admin/_layout.html.twig' %}
+{% block title %}Routen — Velofreundliches Wetzikon Admin{% endblock %}
+{% block topbar_title %}Routen{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.min.css">
+{% endblock %}
+
+{% block body %}
+<main class="adm-main adm-main--full" style="padding-bottom:100px;">
+  <div class="adm-page-head">
+    <div>
+      <h1>Routen</h1>
+      <p>Velonetz-Liniendaten (Vorschlag gelbes Band, kantonale Routen, Velowege …). Änderungen werden erst beim Klick auf „Speichern" übernommen.</p>
+    </div>
+  </div>
+
+  <div class="adm-routes-layout">
+    <aside class="adm-routes-col adm-routes-col--editor">
+      <div class="adm-editor-panel">
+        <div class="adm-editor-panel__head">✎&ensp;Velonetz bearbeiten</div>
+
+        <div class="adm-editor-section">
+          <div class="adm-editor-section-label">Routen-Typ</div>
+          <div class="adm-type-pills" id="typePills">
+            <p style="color:var(--color-muted);font-size:12px;">Lädt …</p>
+          </div>
+        </div>
+
+        <div class="adm-editor-section" id="directionSection">
+          <div class="adm-editor-section-label">Richtung</div>
+          <div class="adm-dir-options">
+            <label class="adm-dir-opt"><input type="radio" name="admDir" value="one-way" checked> Einbahn &rarr;</label>
+            <label class="adm-dir-opt"><input type="radio" name="admDir" value="both-ways"> Beide Richtungen &harr;</label>
+          </div>
+        </div>
+
+        <div class="adm-editor-section">
+          <div class="adm-editor-section-label">Aktionen</div>
+          <div class="adm-editor-actions">
+            <button class="adm-editor-btn" id="btnDrawRoute" type="button"><i data-lucide="plus" width="14" height="14"></i> Neue Route zeichnen</button>
+            <button class="adm-editor-btn" id="btnEditVertices" type="button"><i data-lucide="pencil" width="14" height="14"></i> Wegpunkte bearbeiten</button>
+            <button class="adm-editor-btn adm-editor-btn--danger" id="btnDeleteRoutes" type="button"><i data-lucide="trash-2" width="14" height="14"></i> Route löschen</button>
+          </div>
+        </div>
+
+        <div class="adm-editor-hint" id="editorHint"></div>
+      </div>
+    </aside>
+
+    <div class="adm-route-map-wrap">
+      <div id="routesMap"></div>
+
+      <div class="map-toggle">
+        <button type="button" class="map-toggle-btn active" id="btnLayerStreet">Strasse</button>
+        <button type="button" class="map-toggle-btn" id="btnLayerSatellite">Satellit</button>
+      </div>
+
+      <div class="adm-route-legend" id="routeLegend">
+        <div class="adm-route-legend__title">Routen-Typen</div>
+        <div id="routeLegendRows"></div>
+      </div>
+    </div>
+
+    <aside class="adm-routes-col adm-routes-col--backups">
+      <div class="adm-editor-panel__head"><i data-lucide="history" width="13" height="13" style="vertical-align:-2px;"></i>&ensp;Sicherungen</div>
+      <p class="adm-backups-panel__note">Vor jeder Speicherung wird der bisherige Stand als GeoJSON gesichert. Wiederherstellen erstellt selbst wieder eine neue Sicherung.</p>
+      <div class="adm-backups-list" id="backupsList">
+        <p style="color:var(--color-muted);font-size:12px;">Lädt …</p>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<div class="adm-sticky-actions" style="margin-left:var(--space-7);margin-right:var(--space-7);">
+  <span class="adm-sticky-actions__status" id="routeStatusText">Lädt Routen …</span>
+  <button class="adm-btn adm-btn--secondary" id="btnDiscard" type="button"><i data-lucide="rotate-ccw" width="15" height="15"></i> Verwerfen</button>
+  <button class="adm-btn adm-btn--primary" id="btnSaveRoutes"><i data-lucide="save" width="15" height="15"></i> Speichern</button>
+</div>
+
+<!-- Change-summary confirm modal -->
+<div class="adm-modal-overlay" id="confirmModalOverlay">
+  <div class="adm-modal">
+    <div class="adm-modal__head">
+      <h2>Änderungen bestätigen</h2>
+      <p id="confirmModalCounts"></p>
+    </div>
+    <div class="adm-modal__body">
+      <ul class="adm-changelist" id="confirmModalList"></ul>
+    </div>
+    <div class="adm-modal__foot">
+      <button class="adm-btn adm-btn--secondary" id="btnCancelSave" type="button">Abbrechen</button>
+      <button class="adm-btn adm-btn--primary" id="btnConfirmSave" type="button"><i data-lucide="check" width="15" height="15"></i> Speichern bestätigen</button>
+    </div>
+  </div>
+</div>
+
+<div class="adm-toast" id="routeToast"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="{{ asset('assets/routes-editor.js') }}"></script>
+{% endblock %}

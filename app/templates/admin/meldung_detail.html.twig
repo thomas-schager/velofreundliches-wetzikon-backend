@@ -159,7 +159,13 @@ document.addEventListener('DOMContentLoaded', function () {
   /* ---- Map (draggable pin) ----
      Tile layers, toggle control and pin marker match the canonical look documented in
      velofreundliches-wetzikon-design-system's design-system/map.html (source: velo-melder.html
-     in velofreundliches-wetzikon-contao) -- keep in sync with that doc, not styled ad-hoc here. */
+     in velofreundliches-wetzikon-contao) -- keep in sync with that doc, not styled ad-hoc here.
+     CARTO_API_KEY: since 2026-08, basemaps.cartocdn.com watermarks every tile "API KEY REQUIRED"
+     without one (CARTO is also phasing raster basemaps out in favour of vector tiles -- if this
+     stops being maintained on their end, see design-system/map.html for the plain-OpenStreetMap
+     fallback used briefly here). Free key, no CARTO account needed: carto.com/basemaps/apikey --
+     this one is registered to the production domain; get your own if it stops working elsewhere. */
+  var CARTO_API_KEY = 'cb1_2wxo_1_5095e615a6275239af744999';
   function makeIcon(rating) {
     var color = ratingColors[rating] || '#6b6b67';
     var svg = '<svg viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">'
@@ -171,7 +177,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   var map = L.map('meldungMap', { zoomControl: false }).setView([lat, lng], 16);
   var LAYERS = {
-    street: L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: '&copy; OpenStreetMap contributors &copy; CARTO', subdomains: 'abcd', maxZoom: 19 }),
+    street: L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=' + CARTO_API_KEY, { attribution: '&copy; OpenStreetMap contributors &copy; CARTO', subdomains: 'abcd', maxZoom: 19 }),
     satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri', maxZoom: 19 })
   };
   var currentLayer = 'street';

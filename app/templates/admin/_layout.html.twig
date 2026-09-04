@@ -30,7 +30,7 @@
 
       <div class="adm-sidebar__section">VeloMelder</div>
       <a class="adm-navlink" data-page="meldungen" href="{{ path('admin_meldungen') }}"><i data-lucide="message-square-warning"></i><span class="adm-navlink__label">Meldungen</span>{% if pending_count is defined and pending_count > 0 %}<span class="adm-navlink__badge">{{ pending_count }}</span>{% endif %}</a>
-      <a class="adm-navlink" data-page="routen" href="{{ path('admin_routes_placeholder') }}"><i data-lucide="route"></i><span class="adm-navlink__label">Routen</span></a>
+      <a class="adm-navlink" data-page="routen" href="{{ path('admin_routes') }}"><i data-lucide="route"></i><span class="adm-navlink__label">Routen</span></a>
 
       <div class="adm-sidebar__section">Verwaltung</div>
       <a class="adm-navlink is-disabled" href="#"><i data-lucide="users"></i><span class="adm-navlink__label">Benutzer</span><span class="adm-navlink__soon">Bald</span></a>

@@ -37,7 +37,7 @@ class AuthController extends AbstractApiController
         $password = (string) ($data['password'] ?? '');
 
         try {
-            $result = $this->authService->requestLoginChallenge($email, $password);
+            $result = $this->authService->requestLoginChallenge($email, $password, $request->headers->get('X-Test-Bypass-Token'));
         } catch (InvalidCredentialsException $e) {
             return $this->errorResponse('invalid_credentials', $e->getMessage(), 401);
         }
@@ -59,7 +59,7 @@ class AuthController extends AbstractApiController
         $data = json_decode($request->getContent(), true) ?? [];
         $email = (string) ($data['email'] ?? '');
 
-        $result = $this->authService->requestPasswordReset($email);
+        $result = $this->authService->requestPasswordReset($email, $request->headers->get('X-Test-Bypass-Token'));
 
         return new JsonResponse($result);
     }

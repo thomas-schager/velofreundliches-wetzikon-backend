@@ -437,14 +437,42 @@ paths:
 
   # ---------------------------------------------------------------- ADMIN: ROUTES
   /admin/routes:
+    get:
+      tags: [Admin — Routes]
+      summary: Current Velonetz GeoJSON, with each feature's database id
+      description: >
+        Same data as the public `GET /routes`, but every feature's `properties.id` is included so
+        the editor UI can round-trip it — saving with `id` unchanged tells `PUT /admin/routes`
+        "this exact line", not "delete this one, draw a new one". `id` is admin-only; the public
+        endpoint never includes it.
+      security: [{ sessionAuth: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminRouteFeatureCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
     put:
       tags: [Admin — Routes]
       summary: Replace the full Velonetz GeoJSON
       description: >
-        Full-replace, matching today's "download from the editor, re-upload by hand" workflow —
-        the editor UI keeps its exact current drawing/editing behavior and just calls this instead
-        of exporting a file. See data-contract §3.3. Route edit history/versioning is explicitly
-        out of scope for v1 (see strategy doc §6).
+        Full-replace at the wire level, matching today's "download from the editor, re-upload by
+        hand" workflow — the editor UI keeps its exact current drawing/editing behavior and just
+        calls this instead of exporting a file. See data-contract §3.3.
+
+        Server-side, this is a reconciliation, not a blind delete-and-reinsert: features are
+        matched to existing rows by `properties.id` (see `GET /admin/routes`), so unchanged and
+        edited lines keep their database id across saves — an id-less feature (or one whose id
+        doesn't match an existing row) is treated as new. Before writing anything, the full
+        pre-change state is snapshotted to a GeoJSON file and recorded as a `RouteBackup` (see
+        `GET /admin/routes/backups`), so a bad edit can be rolled back — this replaces the "route
+        edit history is out of scope" note that used to be here (strategy doc §7).
+
+        The editor is expected to call `POST /admin/routes/diff` first and show the admin the
+        resulting change summary before calling this endpoint — there is no server-side
+        distinction between "diffed first" and not, this is a UI-level convention, not enforced
+        here.
       security: [{ sessionAuth: [] }]
       requestBody:
         required: true
@@ -453,12 +481,74 @@ paths:
             schema: { $ref: '#/components/schemas/RouteFeatureCollection' }
       responses:
         '200':
-          description: Replaced.
+          description: Replaced (or a no-op if the proposed state was identical to the current one — no backup is created for a no-op).
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/RouteFeatureCollection' }
+              schema: { $ref: '#/components/schemas/RouteSaveResult' }
         '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /admin/routes/diff:
+    post:
+      tags: [Admin — Routes]
+      summary: Preview what saving a proposed GeoJSON would change — no write
+      description: >
+        Runs the exact same matching/classification `PUT /admin/routes` would, but persists
+        nothing and writes no backup. Meant to render a human-readable, bulleted change summary
+        (`changeSummary.lines`) for the admin to review before they confirm the save.
+      security: [{ sessionAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RouteFeatureCollection' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteChangeSummary' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /admin/routes/backups:
+    get:
+      tags: [Admin — Routes]
+      summary: List pre-change GeoJSON snapshots, newest first
+      security: [{ sessionAuth: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RouteBackup' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /admin/routes/backups/{id}/restore:
+    post:
+      tags: [Admin — Routes]
+      summary: Restore the route network to a previous backup's state
+      description: >
+        Not a special-cased "undo" — internally this loads the backup's snapshot and runs it
+        through the exact same save path as `PUT /admin/routes`, which means restoring itself
+        creates a new backup of the state right before the restore. Restoring is therefore always
+        reversible too.
+      security: [{ sessionAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Restored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteSaveResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
 components:
   parameters:
@@ -596,6 +686,68 @@ components:
           properties:
             type: { type: string, description: "Key into the ROUTE_TYPES registry, e.g. 'vorschlag-gelbes-band'." }
             direction: { type: string, enum: [one-way, both-ways], description: "Only present for non-band, direction-aware types." }
+
+    AdminRouteFeatureCollection:
+      type: object
+      properties:
+        type: { type: string, enum: [FeatureCollection] }
+        features:
+          type: array
+          items: { $ref: '#/components/schemas/AdminRouteFeature' }
+
+    AdminRouteFeature:
+      allOf:
+        - $ref: '#/components/schemas/RouteFeature'
+        - type: object
+          properties:
+            properties:
+              type: object
+              properties:
+                id: { type: integer, description: "Database id. Send back unchanged on PUT /admin/routes to update this exact line; omit for a new one." }
+
+    RouteSaveResult:
+      allOf:
+        - $ref: '#/components/schemas/AdminRouteFeatureCollection'
+        - type: object
+          properties:
+            changeSummary: { $ref: '#/components/schemas/RouteChangeSummary' }
+            backupId: { type: integer, nullable: true, description: "Id of the RouteBackup created by this save; null if the save was a no-op (nothing actually changed)." }
+
+    RouteChangeSummary:
+      type: object
+      properties:
+        addedCount: { type: integer }
+        removedCount: { type: integer }
+        modifiedCount: { type: integer }
+        unchangedCount: { type: integer }
+        lines:
+          type: array
+          items: { type: string }
+          description: 'Ready-to-render German bullet lines, e.g. "Strecke geändert (Velostreifen, bei 47.3245, 8.7310): Verlauf angepasst (4 → 6 Punkte)".'
+        entries:
+          type: array
+          description: Same information as `lines`, structured (action/label/location/before/after) for a UI that wants to render its own layout instead of the pre-formatted text.
+          items: { $ref: '#/components/schemas/RouteChangeEntry' }
+
+    RouteChangeEntry:
+      type: object
+      properties:
+        action: { type: string, enum: [added, removed, modified] }
+        id: { type: integer, nullable: true, description: "Null for 'added' (no database id assigned until save)." }
+        label: { type: string, description: Route type label the change is grouped under (the new type for added/modified, the old type for removed). }
+        location: { type: string, description: "Approximate 'lat, lng' centroid of the line, for a human to recognise which one this is — no reverse geocoding is wired up (see README.md)." }
+
+    RouteBackup:
+      type: object
+      description: Metadata for one pre-change GeoJSON snapshot. The snapshot file itself isn't exposed over the API; it backs POST /admin/routes/backups/{id}/restore server-side.
+      properties:
+        id: { type: integer }
+        createdAt: { type: string, format: date-time }
+        createdByEmail: { type: string, nullable: true }
+        addedCount: { type: integer }
+        removedCount: { type: integer }
+        modifiedCount: { type: integer }
+        summary: { type: string, description: The full bulleted change-summary text for the save that created this backup. }
 
     RouteType:
       type: object

@@ -66,20 +66,30 @@ how consistency between the API and the admin UI is maintained on one shared dat
 ## Database
 
 `database/schema.sql` is a draft MariaDB schema derived directly from `api/openapi.yaml`'s
-schemas — seven tables (`admin_users`, `auth_challenges`, `reports`, `report_photos`,
-`route_types`, `route_features`, `ratings`; table/column names are English even where the
-domain concept is German, e.g. "reports" for "Meldungen" — see `database/schema.sql`'s own
-header), with the two small reference registries
-(`ratings`, `route_types`) pre-seeded with the values already live on the public site. Verified
-by actually loading it into a throwaway MariaDB container; see `DATABASE.md` for how to run it
-locally. Once real Doctrine entities exist, they — not this file — become the source of truth;
-see `docs/api-implementation-strategy.md` §7.
+schemas — eight tables (`admin_users`, `auth_challenges`, `reports`, `report_photos`,
+`route_types`, `route_features`, `ratings`, `route_backups`; table/column names are English even
+where the domain concept is German, e.g. "reports" for "Meldungen" — see `database/schema.sql`'s
+own header), with the two small reference registries (`ratings`, `route_types`) pre-seeded with
+the values already live on the public site. Real Doctrine entities now exist and are the actual
+source of truth (Doctrine Migrations owns schema changes going forward, see
+`docs/api-implementation-strategy.md` §7) — `schema.sql` is kept in sync by hand for anyone who
+wants to read/load the schema without running the app.
+
+## Route editor
+
+`/routen` is a real Leaflet map editor now (`app/templates/admin/routes.html.twig` +
+`app/public/assets/routes-editor.js`), not the earlier stub — map engine (tile layers, band
+overlays, direction arrows, legend, Leaflet.draw tools) is ported from `velo-melder.html?edit` in
+`velofreundliches-wetzikon-contao`, adapted to fetch `ROUTE_TYPES` from `GET /route-types` instead
+of a hand-duplicated JS array, and to persist via the backend instead of localStorage/file
+download. Flow: load current network (`GET /admin/routes`, each line carries its db id) → edit
+in-memory (draw/move/retype/delete — nothing is saved yet) → "Speichern" → `POST
+/admin/routes/diff` renders a bulleted change summary in a confirm modal → only "Speichern
+bestätigen" actually calls `PUT /admin/routes`. A "Sicherungen" panel lists/restores the automatic
+pre-change GeoJSON backups. No auto-save anywhere in this flow.
 
 ## What's intentionally not designed yet
 
-- The **route editor** (replacing `velo-melder.html?edit`'s Leaflet-Draw UI with one calling
-  `PUT /admin/routes`) — `routes-placeholder.html` is a stub so the sidebar navigation isn't
-  broken, not a real design.
 - User management, general settings — present in the sidebar as disabled "Bald" (soon) entries
   so the overall shell reads as complete, not built out.
 
@@ -119,6 +129,12 @@ Deliberately simplified for this local-dev-only pass (documented here rather tha
   local-dev convenience only, the 2FA code is also logged via Monolog (`app/var/log/dev.log`) and,
   in the `dev` environment only, shown directly on the verify page as a "Dev-Modus" fallback in
   case a mail doesn't arrive.
+- **Automated-test email bypass**: a request to `/auth/login` or `/auth/forgot-password` carrying
+  header `X-Test-Bypass-Token: <APP_TEST_BYPASS_TOKEN from .env.local>` skips the real email send
+  entirely and writes the code to `app/var/test-2fa-code.txt` instead — only active in the `dev`
+  environment and only with the exact token, so ordinary use (including a human testing manually
+  in a browser) always emails as normal; see `AuthService::isTestBypass()`. Exists so running
+  automated browser tests against the login/reset flow doesn't send a real email every time.
 - **The route editor** (`PUT /admin/routes`) is not implemented — `/routen` stays a stub page, per
   README's "What's intentionally not designed yet" below (unchanged scope decision).
 - Reverse-geocoded `address`/`addressDistanceM` on submitted reports are always `null` — no

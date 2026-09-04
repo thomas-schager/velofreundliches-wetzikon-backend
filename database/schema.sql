@@ -24,9 +24,15 @@
 --                       must not carry over, so this is a proper child table of URLs, not a
 --                       JSON/serialized column)
 --   route_features  -- Velonetz line geometry (data-contract.md §3, GeoJSON LineString features)
+--   route_backups   -- added 2026-09-04 via migrations/Version20260904075016.php, the first real
+--                       schema change since the app existed -- this file was hand-updated to
+--                       match rather than regenerated, since Doctrine's own diff also proposed
+--                       unrelated ENUM/COMMENT normalization on other tables (pre-existing drift
+--                       from the baseline-marked-applied bootstrap, not part of this change; left
+--                       alone). Pre-change GeoJSON snapshots for the route editor, see
+--                       App\Entity\RouteBackup / RouteEditingService::save().
 --
--- Explicitly NOT modeled here (see api-implementation-strategy.md §7, "out of scope for v1"):
---   - route edit history/versioning -- PUT /admin/routes is a full replace, no undo
+-- Explicitly NOT modeled here (see api-implementation-strategy.md §7):
 --   - multi-region/replica concerns -- single DB instance is assumed
 
 SET NAMES utf8mb4;
@@ -177,6 +183,26 @@ CREATE TABLE route_features (
   PRIMARY KEY (id),
   KEY idx_route_features_type (route_type_key),
   CONSTRAINT fk_route_features_type FOREIGN KEY (route_type_key) REFERENCES route_types (`key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================================
+-- route_backups — one row per saved route-editor change, see RouteEditingService::save(). The
+-- actual pre-change GeoJSON snapshot lives on disk (var/route-backups/, not web-served, not
+-- committed); this row is just its metadata + a human-readable summary of what changed, so
+-- backups are listable/restorable without re-parsing every snapshot file.
+-- ============================================================================================
+CREATE TABLE route_backups (
+  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  file_path       VARCHAR(255) NOT NULL COMMENT 'relative to var/route-backups/',
+  created_by      BIGINT UNSIGNED NULL,
+  added_count     SMALLINT UNSIGNED NOT NULL,
+  removed_count   SMALLINT UNSIGNED NOT NULL,
+  modified_count  SMALLINT UNSIGNED NOT NULL,
+  summary         TEXT NOT NULL COMMENT 'bulleted, human-readable, e.g. "- Strecke geändert (...): Verlauf angepasst"',
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_route_backups_created_by (created_by),
+  CONSTRAINT fk_route_backups_created_by FOREIGN KEY (created_by) REFERENCES admin_users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

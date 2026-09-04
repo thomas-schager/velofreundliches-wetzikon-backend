@@ -74,11 +74,14 @@ docker exec -i velowetzikon-backend-mariadb mariadb -uroot -pgeheim velowetzikon
   < database/schema.sql
 ```
 
-This creates all seven tables and seeds the two small reference registries (`ratings`,
+This creates all eight tables and seeds the two small reference registries (`ratings`,
 `route_types`) with the values already live on the public site today — see `schema.sql`'s own
-header comment for exactly where each table's shape came from. `reports`, `report_photos`, and
-`route_features` start empty; there's no legacy data to import (today's "database" is two static
-files, `velo-meldungen.json` and `velo-routes.geojson`, both in `VeloWetzikon_Contao`).
+header comment for exactly where each table's shape came from. `reports`, `report_photos`,
+`route_features`, and `route_backups` start empty; there's no legacy data to import (today's
+"database" is two static files, `velo-meldungen.json` and `velo-routes.geojson`, both in
+`VeloWetzikon_Contao`). (On an already-running app, `route_backups` was in fact added later via
+a real Doctrine migration, not by re-running this file — see `schema.sql`'s header. It's included
+here too so a from-scratch load produces the same end state.)
 
 Re-running the load against a non-empty database will fail on the first `CREATE TABLE` (tables
 already exist) — drop the database and recreate it first if you want a clean reload:
@@ -96,10 +99,10 @@ docker exec velowetzikon-backend-mariadb mariadb -uroot -pgeheim velowetzikon_ba
 docker exec velowetzikon-backend-mariadb mariadb -uroot -pgeheim velowetzikon_backend -e "SELECT * FROM ratings;"
 ```
 
-Expect 7 tables (`admin_users`, `auth_challenges`, `report_photos`, `reports`, `ratings`,
-`route_features`, `route_types`) plus Doctrine's own `doctrine_migration_versions` tracking table
-(8 total once the Symfony app has run migrations against it), and 5 seeded rows in `ratings`
-(9 in `route_types`).
+Expect 8 tables (`admin_users`, `auth_challenges`, `report_photos`, `reports`, `ratings`,
+`route_features`, `route_types`, `route_backups`) plus Doctrine's own `doctrine_migration_versions`
+tracking table (9 total once the Symfony app has run migrations against it), and 5 seeded rows in
+`ratings` (9 in `route_types`).
 
 ## Where the connection settings come from
 

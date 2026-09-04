@@ -14,6 +14,7 @@ use DateInterval;
 use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Symfony\Component\Mailer\MailerInterface;
 use Symfony\Component\Mime\Email;
@@ -30,6 +31,13 @@ use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
  * additionally logged via Monolog in dev, and this service returns the plaintext code so the
  * verify page's dev-mode banner still works as a local-testing fallback -- see AuthController /
  * templates/auth/verify.html.twig.
+ *
+ * Automated-test email bypass: a caller that sends the current APP_TEST_BYPASS_TOKEN (see
+ * .env.local) gets its code written to var/test-2fa-code.txt instead of emailed -- see
+ * sendCodeEmail()/isTestBypass(). This exists so running Puppeteer et al. against a real login
+ * flow doesn't spam a real inbox on every test run; it only ever applies in the dev environment,
+ * and only when the caller supplies the exact token, so ordinary human use (including a human
+ * manually testing locally) is unaffected and always emails, per the default described above.
  */
 class AuthService
 {
@@ -44,22 +52,25 @@ class AuthService
         private readonly LoggerInterface $logger,
         private readonly MailerInterface $mailer,
         private readonly string $environment,
+        private readonly string $testBypassToken,
+        private readonly string $testBypassFile,
     ) {
     }
 
     /**
-     * Step 1 of login: validate email+password, issue a login challenge (emailed code).
+     * Step 1 of login: validate email+password, issue a login challenge (emailed code, unless
+     * $testBypassToken matches -- see class docblock).
      *
      * @return array{challengeToken: string, maskedEmail: string, devCode: ?string}
      */
-    public function requestLoginChallenge(string $email, string $password): array
+    public function requestLoginChallenge(string $email, string $password, ?string $testBypassToken = null): array
     {
         $user = $this->adminUsers->findOneByEmail($email);
         if ($user === null || !$user->isActive() || !$this->passwordHasher->isPasswordValid($user, $password)) {
             throw new InvalidCredentialsException('E-Mail-Adresse oder Passwort ist falsch.');
         }
 
-        [$challenge, $code] = $this->createChallenge(AuthChallenge::PURPOSE_LOGIN, $user);
+        [$challenge, $code] = $this->createChallenge(AuthChallenge::PURPOSE_LOGIN, $user, $testBypassToken);
 
         $this->logger->info('2FA login code generated', ['email' => $user->getEmail(), 'code' => $code]);
 
@@ -93,10 +104,10 @@ class AuthService
      *
      * @return array{challengeToken: string, devCode: ?string}
      */
-    public function requestPasswordReset(string $email): array
+    public function requestPasswordReset(string $email, ?string $testBypassToken = null): array
     {
         $user = $this->adminUsers->findOneByEmail($email);
-        [$challenge, $code] = $this->createChallenge(AuthChallenge::PURPOSE_PASSWORD_RESET, $user);
+        [$challenge, $code] = $this->createChallenge(AuthChallenge::PURPOSE_PASSWORD_RESET, $user, $testBypassToken);
 
         if ($user !== null) {
             $this->logger->info('2FA password-reset code generated', ['email' => $user->getEmail(), 'code' => $code]);
@@ -157,7 +168,7 @@ class AuthService
     /**
      * @return array{0: AuthChallenge, 1: string} the challenge and the plaintext code (never persisted)
      */
-    private function createChallenge(string $purpose, ?AdminUser $user): array
+    private function createChallenge(string $purpose, ?AdminUser $user, ?string $testBypassToken): array
     {
         $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
         $challenge = new AuthChallenge();
@@ -171,10 +182,37 @@ class AuthService
         $this->em->flush();
 
         if ($user !== null) {
-            $this->sendCodeEmail($user->getEmail(), $code, $purpose);
+            $this->sendCodeEmail($user->getEmail(), $code, $purpose, $testBypassToken);
         }
 
         return [$challenge, $code];
+    }
+
+    /**
+     * True only when: dev environment, a real token is configured (.env.local), and the caller
+     * supplied the exact match -- see class docblock. hash_equals() because this is a bearer
+     * secret, same reasoning as comparing password hashes elsewhere in this class.
+     */
+    private function isTestBypass(?string $providedToken): bool
+    {
+        return $this->environment === 'dev'
+            && $this->testBypassToken !== ''
+            && $providedToken !== null
+            && hash_equals($this->testBypassToken, $providedToken);
+    }
+
+    /**
+     * Overwrites a single well-known file with the current code -- tests run one login/reset at
+     * a time, so there's no need for a queue or per-request filename. var/ is gitignored and not
+     * web-served.
+     */
+    private function writeTestBypassFile(string $purpose, string $code): void
+    {
+        (new Filesystem())->dumpFile($this->testBypassFile, json_encode([
+            'purpose' => $purpose,
+            'code' => $code,
+            'createdAt' => (new DateTimeImmutable())->format(DATE_ATOM),
+        ], JSON_PRETTY_PRINT));
     }
 
     /**
@@ -182,8 +220,15 @@ class AuthService
      * code and a password-reset code are never visually interchangeable in an inbox -- someone
      * who didn't request a password reset should immediately recognise the mail as wrong.
      */
-    private function sendCodeEmail(string $to, string $code, string $purpose): void
+    private function sendCodeEmail(string $to, string $code, string $purpose, ?string $testBypassToken = null): void
     {
+        if ($this->isTestBypass($testBypassToken)) {
+            $this->writeTestBypassFile($purpose, $code);
+            $this->logger->info('2FA code written to test-bypass file instead of emailed', ['purpose' => $purpose]);
+
+            return;
+        }
+
         if ($purpose === AuthChallenge::PURPOSE_PASSWORD_RESET) {
             $subject = 'Code zum Zurücksetzen des Passworts';
             $body = "Sie haben ein neues Passwort für Ihr Konto im Velofreundliches-Wetzikon-Backend angefordert.\n\n"

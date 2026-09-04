@@ -213,8 +213,14 @@ mode, same fix: catch drift in CI, don't rely on someone noticing.
 
 Recorded here so a future revisit is a conscious decision, not a rediscovery:
 
-- **Route edit history/versioning** — already flagged as out of scope in
-  `velo-melder-data-contract.md` §3.3. `PUT /admin/routes` is a full replace, no undo.
+- **Full route edit history/versioning** (branching, diffing across arbitrary points in time,
+  per-feature audit log) is still out of scope, per `velo-melder-data-contract.md` §3.3 — `PUT
+  /admin/routes` stays a full replace at the wire level. What *is* now implemented (2026-09-04) is
+  a lighter mechanism that covers the actual need ("a bad edit shouldn't be unrecoverable"):
+  `RouteEditingService::save()` snapshots the full pre-change state to a GeoJSON file and records
+  it as a `RouteBackup` before every write, restorable via `POST
+  /admin/routes/backups/{id}/restore` — see `Controller/Api/AdminRoutesController`. This is a
+  linear backup trail, not a version graph; restoring is itself just another tracked save.
 - **Splitting into separate services** — see §1. Revisit only with concrete scaling/team evidence.
 - **Token-based API auth for the admin app** — see §4. Revisit only if a non-browser admin
   client (e.g. a native app) appears.

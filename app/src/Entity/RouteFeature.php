@@ -94,4 +94,9 @@ class RouteFeature
     {
         return $this->updatedAt;
     }
+
+    public function touch(): void
+    {
+        $this->updatedAt = new DateTimeImmutable();
+    }
 }
