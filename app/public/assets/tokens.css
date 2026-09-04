@@ -1,0 +1,116 @@
+/*
+ * Velofreundliches Wetzikon — Design Tokens
+ * Palette B — Primary #dc3406
+ *
+ * VENDORED COPY. Canonical source is the `velofreundliches-wetzikon-design-system` repo's
+ * tokens.css — do not edit the values here directly; change them there first, then re-copy.
+ * See that repo's README.md ("How a consuming repo stays in sync") and this repo's
+ * docs/api-implementation-strategy.md for how this app is expected to consume it long-term
+ * (a Composer VCS dependency is the likely upgrade once this app has a real build step; for this
+ * prototype stage, a manual copy is enough).
+ *
+ * Copied verbatim 2026-08-19.
+ */
+
+:root {
+  /* ---- Brand ---- */
+  --color-primary:        #dc3406;
+  --color-primary-hover:  #c32d05;
+  --color-primary-press:  #a82704;
+  --color-primary-tint:   #fbe7df;
+
+  --color-secondary:       #000000;
+  --color-secondary-hover: #1a1a1a;
+
+  --color-accent:          #fdd003; /* yellow — eyebrow on dark only */
+
+  --color-success:        #296310;
+  --color-success-dark:   #225210;
+  --color-success-tint:   #e6efe0;
+  --color-danger:         #a82704;
+
+  /* ---- Neutrals ---- */
+  --color-background:     #fafaf8;
+  --color-surface:        #ffffff;
+  --color-surface-2:      #f4f3ef;
+  --color-border:         #e8e6e0;
+  --color-border-strong:  #cfcdc6;
+  --color-text:           #000000;
+  --color-text-muted:     #5e5e5a;
+  --color-muted:          #8a8a86;
+  --color-label-muted:    #6b6b67;
+
+  /* ---- Rating scale (semantic, never brand) ---- */
+  --color-rate-1: #b91c1c;
+  --color-rate-2: #ea580c;
+  --color-rate-3: #ca8a04;
+  --color-rate-4: #65a30d;
+  --color-rate-5: #15803d;
+
+  /* ---- Focus / validation rings ---- */
+  --focus-ring:    rgba(220,52,6,0.15);
+  --success-ring:  rgba(41,99,16,0.12);
+  --danger-tint:   rgba(220,52,6,0.12);
+
+  /* ---- Type ---- */
+  --font-display: 'Jost', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-body:    'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+
+  --text-xs:   12px;
+  --text-sm:   14px;
+  --text-base: 16px;
+  --text-lg:   18px;
+  --text-xl:   22px;
+  --text-2xl:  28px;
+  --text-3xl:  36px;
+  --text-4xl:  48px;
+  --text-5xl:  64px;
+  --text-6xl:  80px;
+
+  --lh-tight:   1.05;
+  --lh-snug:    1.2;
+  --lh-normal:  1.45;
+  --lh-relaxed: 1.6;
+
+  --tracking-tight: -0.01em;
+  --tracking-wide:   0.08em;
+
+  /* ---- Spacing (8px grid) ---- */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  24px;
+  --space-6:  32px;
+  --space-7:  48px;
+  --space-8:  64px;
+  --space-9:  96px;
+  --space-10: 128px;
+
+  /* ---- Radii ---- */
+  --radius-sm:   4px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-full: 999px;
+
+  /* ---- Shadows ---- */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 1px 2px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.04);
+  --shadow-lg: 0 2px 4px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06);
+
+  /* ---- Layout ---- */
+  --max-w:           1400px;
+  --container-prose: 680px;
+  --nav-h:           72px;
+  --gutter:          20px;
+
+  /* ---- Motion ---- */
+  --ease:     cubic-bezier(.2,.7,.3,1);
+  --dur-fast: 120ms;
+  --dur:      180ms;
+  --dur-slow: 280ms;
+
+  /* ---- Nav breakpoint (read by accessible-nav JS, unitless integer) ---- */
+  --nav-breakpoint: 960;
+}
+@media (min-width: 600px) { :root { --gutter: 32px; } }

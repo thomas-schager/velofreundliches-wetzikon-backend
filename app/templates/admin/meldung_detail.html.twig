@@ -1,0 +1,257 @@
+{% extends 'admin/_layout.html.twig' %}
+{% block title %}Meldung prüfen — Velofreundliches Wetzikon Admin{% endblock %}
+{% block topbar_title %}Meldung prüfen{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>#meldungMap { height: 100%; width: 100%; }</style>
+{% endblock %}
+
+{% block body %}
+<main class="adm-main" style="padding-bottom:100px;">
+  <a href="{{ path('admin_meldungen') }}" class="adm-auth__back" style="margin-bottom:16px;"><i data-lucide="arrow-left" width="14" height="14"></i> Zurück zu Meldungen</a>
+
+  <div class="adm-page-head">
+    <div>
+      <h1 style="display:flex;align-items:center;gap:10px;">Meldung <span style="font-family:monospace;font-size:16px;color:var(--color-muted);">#{{ report_id }}</span></h1>
+      <p>Eingegangen {{ report.createdAt|date('d.m.Y, H:i') }} Uhr</p>
+    </div>
+    <div class="adm-page-head__actions">
+      <span id="statusBadge">
+        {% if report.status == 'published' %}
+          <span class="adm-badge adm-badge--published"><span class="adm-badge__dot"></span>Veröffentlicht</span>
+        {% elseif report.status == 'declined' %}
+          <span class="adm-badge adm-badge--declined"><span class="adm-badge__dot"></span>Abgelehnt</span>
+        {% elseif report.status == 'pending_review' %}
+          <span class="adm-badge adm-badge--new"><span class="adm-badge__dot"></span>Neu</span>
+        {% else %}
+          <span class="adm-badge"><span class="adm-badge__dot"></span>Ausstehend (E-Mail)</span>
+        {% endif %}
+      </span>
+    </div>
+  </div>
+
+  {% if report.status not in ['pending_review'] %}
+  <div class="adm-alert" style="background:#eef2ff;border:1px solid #6366f1;color:#3730a3;margin-bottom:16px;">
+    <i data-lucide="info" width="16" height="16"></i>
+    <span>Status ist "{{ report.status }}" — Veröffentlichen/Ablehnen ist normalerweise nur aus "Neu" (pending_review) vorgesehen, ist hier aber zu Testzwecken trotzdem verfügbar.</span>
+  </div>
+  {% endif %}
+
+  <div class="adm-detail-grid">
+    <!-- LEFT: editable content -->
+    <div>
+      <div class="adm-field">
+        <label class="adm-label">Standort</label>
+        <div class="adm-detail-map">
+          <div id="meldungMap"></div>
+          <div class="map-toggle">
+            <button type="button" class="map-toggle-btn active" id="btnLayerStreet">Strasse</button>
+            <button type="button" class="map-toggle-btn" id="btnLayerSatellite">Satellit</button>
+          </div>
+          <span class="adm-map-hint">Pin ziehen, um den Standort zu korrigieren</span>
+        </div>
+      </div>
+
+      <div class="adm-field">
+        <label class="adm-label">Bewertung</label>
+        <div class="adm-rating-edit" id="ratingEdit">
+          {% for rv, label in rating_labels %}
+          <button type="button" data-r="{{ rv }}" class="{{ rv == report.rating ? 'is-selected' : '' }}"><span class="adm-r-bar"></span><span class="adm-r-label">{{ label }}</span></button>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="adm-field">
+        <label class="adm-label" for="commentField">Kommentar</label>
+        <textarea id="commentField" rows="4">{{ report.comment }}</textarea>
+      </div>
+
+      <div class="adm-field">
+        <label class="adm-label">Fotos</label>
+        <div class="adm-photo-grid" id="photoGrid">
+          {% for photo in report.photos %}
+          <div class="adm-photo-thumb"><img src="{{ photo.url }}" alt="Foto"></div>
+          {% else %}
+          <p style="color:var(--color-muted);font-size:13px;">Keine Fotos angehängt.</p>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="adm-field" style="display:flex;gap:24px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:200px;">
+          <label class="adm-label" for="nameField">Name</label>
+          <input type="text" id="nameField" placeholder="Name (optional)" value="{{ report.name }}" {{ report.anonymous ? 'disabled' : '' }}>
+        </div>
+        <div style="padding-top:26px;">
+          <label class="adm-checkbox-row"><input type="checkbox" id="anonField" style="width:16px;height:16px;min-height:0;" {{ report.anonymous ? 'checked' : '' }}> Anonym anzeigen</label>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: metadata -->
+    <div>
+      <div class="adm-card">
+        <div style="font:600 13px var(--font-display);margin-bottom:14px;">Details</div>
+        <div class="adm-kv">
+          <div class="adm-kv__row"><span class="adm-kv__label">ID</span><span class="adm-kv__value adm-kv__value--mono">{{ report_id }}</span></div>
+          <div class="adm-kv__row"><span class="adm-kv__label">Koordinaten</span><span class="adm-kv__value adm-kv__value--mono" id="kvLatLng">{{ report.lat }}, {{ report.lng }}</span></div>
+          <div class="adm-kv__row"><span class="adm-kv__label">Adresse (geokodiert)</span><span class="adm-kv__value">{{ report.address ?: '—' }}</span></div>
+          <div class="adm-kv__row"><span class="adm-kv__label">Distanz zur Adresse</span><span class="adm-kv__value">{{ report.addressDistanceM is not null ? report.addressDistanceM ~ ' m' : '—' }}</span></div>
+          <div class="adm-kv__row"><span class="adm-kv__label">E-Mail (intern)</span><span class="adm-kv__value adm-kv__value--email">{{ report.email }}{% if report.emailConfirmed %} <i data-lucide="check-circle" width="13" height="13" style="color:var(--color-success);"></i>{% endif %}</span></div>
+          <div class="adm-kv__row"><span class="adm-kv__label">E-Mail bestätigt</span><span class="adm-kv__value">{{ report.emailConfirmed ? 'Ja' : 'Nein' }}</span></div>
+        </div>
+        <div class="adm-internal-note">
+          <i data-lucide="lock" width="14" height="14"></i>
+          <span>Die E-Mail-Adresse ist ausschliesslich für die interne Moderation sichtbar. Sie erscheint in keiner öffentlichen Ansicht oder API-Antwort (siehe API-Spezifikation, Tag "Admin").</span>
+        </div>
+      </div>
+
+      <div class="adm-card" style="margin-top:16px;">
+        <div style="font:600 13px var(--font-display);margin-bottom:14px;">Interne Notiz</div>
+        <textarea id="internalNoteField" rows="3" placeholder="Nur für die Redaktion sichtbar…">{{ report.internalNote }}</textarea>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="adm-sticky-actions" style="margin-left:var(--space-7);margin-right:var(--space-7);max-width:1320px;margin-inline:auto;">
+  <span class="adm-sticky-actions__status">Status: <strong id="stickyStatusText">
+    {% if report.status == 'published' %}Veröffentlicht
+    {% elseif report.status == 'declined' %}Abgelehnt
+    {% elseif report.status == 'pending_review' %}Neu — noch nicht geprüft
+    {% else %}Ausstehend (E-Mail-Bestätigung){% endif %}
+  </strong></span>
+  <button class="adm-btn adm-btn--danger" id="btnDecline"><i data-lucide="x" width="15" height="15"></i> Ablehnen</button>
+  <button class="adm-btn adm-btn--secondary" id="btnSave"><i data-lucide="save" width="15" height="15"></i> Änderungen speichern</button>
+  <button class="adm-btn adm-btn--primary" id="btnPublish"><i data-lucide="check" width="15" height="15"></i> Veröffentlichen</button>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var reportApiUrl = {{ ('/admin/reports/' ~ report_id)|json_encode|raw }};
+  var version = {{ report.version }};
+  var lat = {{ report.lat }};
+  var lng = {{ report.lng }};
+  var ratingColors = {{ rating_colors|json_encode|raw }};
+
+  /* ---- Rating editor ---- */
+  var ratingEdit = document.getElementById('ratingEdit');
+  var selectedRating = {{ report.rating }};
+  function selectRating(r) {
+    selectedRating = r;
+    Array.prototype.slice.call(ratingEdit.querySelectorAll('button')).forEach(function (b) {
+      b.classList.toggle('is-selected', Number(b.dataset.r) === r);
+    });
+    if (marker) marker.setIcon(makeIcon(selectedRating));
+  }
+  ratingEdit.querySelectorAll('button').forEach(function (btn) {
+    btn.addEventListener('click', function () { selectRating(Number(btn.dataset.r)); });
+  });
+
+  /* ---- Anonym toggle ---- */
+  document.getElementById('anonField').addEventListener('change', function () {
+    document.getElementById('nameField').disabled = this.checked;
+  });
+
+  /* ---- Map (draggable pin) ----
+     Tile layers, toggle control and pin marker match the canonical look documented in
+     velofreundliches-wetzikon-design-system's design-system/map.html (source: velo-melder.html
+     in velofreundliches-wetzikon-contao) -- keep in sync with that doc, not styled ad-hoc here. */
+  function makeIcon(rating) {
+    var color = ratingColors[rating] || '#6b6b67';
+    var svg = '<svg viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">'
+      + '<path d="M12 0C5.37 0 0 5.37 0 12c0 8.5 12 20 12 20S24 20.5 24 12C24 5.37 18.63 0 12 0z" fill="' + color + '"/>'
+      + '<circle cx="12" cy="12" r="5" fill="rgba(255,255,255,0.35)"/>'
+      + '</svg>';
+    return L.divIcon({ html: '<div class="custom-pin">' + svg + '</div>', iconSize: [24, 32], iconAnchor: [12, 32], popupAnchor: [0, -34], className: '' });
+  }
+
+  var map = L.map('meldungMap', { zoomControl: false }).setView([lat, lng], 16);
+  var LAYERS = {
+    street: L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: '&copy; OpenStreetMap contributors &copy; CARTO', subdomains: 'abcd', maxZoom: 19 }),
+    satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri', maxZoom: 19 })
+  };
+  var currentLayer = 'street';
+  LAYERS.street.addTo(map);
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+  var toggleEl = document.querySelector('.adm-detail-map .map-toggle');
+  L.DomEvent.disableClickPropagation(toggleEl);
+  document.getElementById('btnLayerStreet').addEventListener('click', function () { setLayer('street'); });
+  document.getElementById('btnLayerSatellite').addEventListener('click', function () { setLayer('satellite'); });
+  function setLayer(name) {
+    if (name === currentLayer) return;
+    map.removeLayer(LAYERS[currentLayer]);
+    LAYERS[name].addTo(map);
+    currentLayer = name;
+    document.getElementById('btnLayerStreet').classList.toggle('active', name === 'street');
+    document.getElementById('btnLayerSatellite').classList.toggle('active', name === 'satellite');
+  }
+
+  var marker = L.marker([lat, lng], { draggable: true, icon: makeIcon(selectedRating) }).addTo(map);
+  marker.on('dragend', function () {
+    var pos = marker.getLatLng();
+    lat = pos.lat; lng = pos.lng;
+    document.getElementById('kvLatLng').textContent = lat.toFixed(6) + ', ' + lng.toFixed(6);
+  });
+
+  function currentPatch() {
+    return {
+      lat: lat,
+      lng: lng,
+      rating: selectedRating,
+      comment: document.getElementById('commentField').value,
+      name: document.getElementById('nameField').value,
+      anonymous: document.getElementById('anonField').checked,
+      internalNote: document.getElementById('internalNoteField').value
+    };
+  }
+
+  function submitPatch(extra, onSuccess) {
+    var body = Object.assign(currentPatch(), extra || {});
+    fetch(reportApiUrl, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'If-Match': String(version) },
+      body: JSON.stringify(body)
+    }).then(function (res) {
+      return res.json().then(function (data) { return { ok: res.ok, status: res.status, data: data }; });
+    }).then(function (result) {
+      if (!result.ok) {
+        if (result.status === 409) {
+          alert('Diese Meldung wurde inzwischen von einer anderen Person geändert. Bitte Seite neu laden.');
+        } else {
+          alert('Fehler: ' + (result.data.message || result.status));
+        }
+        return;
+      }
+      version = result.data.version;
+      if (onSuccess) onSuccess(result.data);
+    }).catch(function () {
+      alert('Verbindung zum Server fehlgeschlagen.');
+    });
+  }
+
+  document.getElementById('btnSave').addEventListener('click', function () {
+    submitPatch({}, function () {
+      alert('Änderungen gespeichert.');
+    });
+  });
+  document.getElementById('btnPublish').addEventListener('click', function () {
+    submitPatch({ status: 'published' }, function () {
+      window.location.href = '{{ path('admin_meldungen') }}?status=published';
+    });
+  });
+  document.getElementById('btnDecline').addEventListener('click', function () {
+    if (!confirm('Diese Meldung wirklich ablehnen? Sie erscheint danach in keiner öffentlichen Ansicht.')) return;
+    submitPatch({ status: 'declined' }, function () {
+      window.location.href = '{{ path('admin_meldungen') }}?status=declined';
+    });
+  });
+
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+});
+</script>
+{% endblock %}

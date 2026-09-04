@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bestätigungscode — Velofreundliches Wetzikon Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ asset('assets/tokens.css') }}">
+<link rel="stylesheet" href="{{ asset('assets/admin.css') }}">
+</head>
+<body>
+
+<div class="adm-auth">
+  <aside class="adm-auth__side">
+    <div class="adm-auth__side-top">
+      <a href="{{ path('admin_login') }}" class="vw-logo" style="pointer-events:none;">
+        <span class="vw-logo__bar"></span>
+        <span class="vw-logo__text">
+          <span class="vw-logo__top">velofreundliches</span>
+          <span class="vw-logo__bottom">WETZIKON</span>
+        </span>
+      </a>
+    </div>
+  </aside>
+
+  <div class="adm-auth__main">
+    <div class="adm-auth__card">
+      <div class="adm-auth__logo-mobile">
+        <a href="{{ path('admin_login') }}" class="vw-logo" style="pointer-events:none;">
+          <span class="vw-logo__bar"></span>
+          <span class="vw-logo__text">
+            <span class="vw-logo__top">velofreundliches</span>
+            <span class="vw-logo__bottom">WETZIKON</span>
+          </span>
+        </a>
+      </div>
+
+      <a href="{{ flow == 'reset' ? path('admin_forgot_password') : path('admin_login') }}" id="backLink" class="adm-auth__back"><i data-lucide="arrow-left" width="14" height="14"></i> Zurück</a>
+
+      <span class="adm-auth__eyebrow">Zwei-Faktor-Bestätigung</span>
+      <h1 class="adm-auth__title">Code eingeben</h1>
+      <p class="adm-auth__lead" id="leadText">Gesendet an <strong id="maskedEmail">{{ masked_email|default('••••••@velofreundliches-wetzikon.ch') }}</strong></p>
+
+      {% if dev_code %}
+      <div class="adm-alert" style="background:#fff7e6;border:1px dashed #ca8a04;color:#7a5b00;">
+        <i data-lucide="flask-conical" width="16" height="16"></i>
+        <span>Dev-Modus: Code lautet <strong>{{ dev_code }}</strong> (kein SMTP lokal konfiguriert — auch in <code>var/log/dev.log</code> protokolliert).</span>
+      </div>
+      {% endif %}
+
+      <div id="verifyError" class="adm-alert adm-alert--error" style="display:none;">
+        <i data-lucide="alert-circle" width="16" height="16"></i>
+        <span id="verifyErrorText">Der Code ist ungültig oder abgelaufen. Bitte erneut versuchen.</span>
+      </div>
+
+      <form id="verifyForm" novalidate>
+        <div class="adm-field">
+          <label class="adm-label" style="text-align:center;display:block;">6-stelliger Code</label>
+          <div class="adm-otp-row">
+            <input class="adm-otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" data-otp="0">
+            <input class="adm-otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" data-otp="1">
+            <input class="adm-otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" data-otp="2">
+            <input class="adm-otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" data-otp="3">
+            <input class="adm-otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" data-otp="4">
+            <input class="adm-otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" data-otp="5">
+          </div>
+        </div>
+        <button type="submit" class="adm-btn adm-btn--primary adm-btn--block" style="margin-top:10px;">
+          Bestätigen <i data-lucide="check" width="16" height="16"></i>
+        </button>
+      </form>
+
+      <p class="adm-auth__foot">
+        <a href="#" id="resendLink">Code erneut senden</a>
+        <span id="resendCooldown" style="display:none;color:var(--color-muted);">Erneut senden in <span id="cooldownNum">30</span>s</span>
+      </p>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+
+  var flow = {{ flow == 'reset' ? "'reset'" : "'login'" }};
+  var challengeToken = {{ challenge_token|json_encode|raw }};
+
+  /* ---- OTP auto-advance / backspace / paste ---- */
+  var digits = Array.prototype.slice.call(document.querySelectorAll('.adm-otp-digit'));
+  digits.forEach(function (input, i) {
+    input.addEventListener('input', function () {
+      input.value = input.value.replace(/[^0-9]/g, '').slice(0, 1);
+      if (input.value && digits[i + 1]) digits[i + 1].focus();
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Backspace' && !input.value && digits[i - 1]) {
+        digits[i - 1].focus();
+      }
+    });
+    input.addEventListener('paste', function (e) {
+      var text = (e.clipboardData || window.clipboardData).getData('text').replace(/[^0-9]/g, '');
+      if (!text) return;
+      e.preventDefault();
+      text.slice(0, 6).split('').forEach(function (ch, idx) {
+        if (digits[idx]) digits[idx].value = ch;
+      });
+      var next = digits[Math.min(text.length, 5)];
+      if (next) next.focus();
+    });
+  });
+  digits[0].focus();
+
+  /* ---- Resend cooldown (decorative -- matches design prototype; no re-send call wired up) ---- */
+  var resendLink = document.getElementById('resendLink');
+  var cooldownEl = document.getElementById('resendCooldown');
+  var cooldownNum = document.getElementById('cooldownNum');
+  resendLink.addEventListener('click', function (e) {
+    e.preventDefault();
+    resendLink.style.display = 'none';
+    cooldownEl.style.display = 'inline';
+    var n = 30;
+    var t = setInterval(function () {
+      n -= 1;
+      cooldownNum.textContent = n;
+      if (n <= 0) {
+        clearInterval(t);
+        resendLink.style.display = 'inline';
+        cooldownEl.style.display = 'none';
+      }
+    }, 1000);
+  });
+
+  /* ---- Submit ---- */
+  var form = document.getElementById('verifyForm');
+  var errorBox = document.getElementById('verifyError');
+  var errorText = document.getElementById('verifyErrorText');
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    errorBox.style.display = 'none';
+    var code = digits.map(function (d) { return d.value; }).join('');
+    if (code.length !== 6) {
+      errorText.textContent = 'Bitte alle 6 Ziffern eingeben.';
+      errorBox.style.display = 'flex';
+      return;
+    }
+
+    var url = flow === 'reset' ? '{{ path('api_auth_forgot_password_verify') }}' : '{{ path('api_auth_login_verify') }}';
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challengeToken: challengeToken, code: code })
+    }).then(function (res) {
+      return res.json().then(function (body) { return { ok: res.ok, body: body }; });
+    }).then(function (result) {
+      if (!result.ok) {
+        errorText.textContent = result.body.message || 'Der Code ist ungültig oder abgelaufen.';
+        errorBox.style.display = 'flex';
+        return;
+      }
+      if (flow === 'reset') {
+        window.location.href = '{{ path('admin_reset_password') }}?resetToken=' + encodeURIComponent(result.body.resetToken);
+      } else {
+        window.location.href = '{{ path('admin_dashboard') }}';
+      }
+    }).catch(function () {
+      errorText.textContent = 'Verbindung zum Server fehlgeschlagen.';
+      errorBox.style.display = 'flex';
+    });
+  });
+});
+</script>
+</body>
+</html>

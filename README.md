@@ -2,13 +2,17 @@
 
 Admin backend (moderation of VeloMelder submissions, Velonetz route data) and public API for the
 [velofreundliches-wetzikon-contao](https://github.com/thomas-schager/velofreundliches-wetzikon-contao)
-public site and its standalone `velo-melder.html` tool. No backend code exists yet — this
-repository currently holds the **design/API groundwork** the real implementation will be built
-from: a clickable HTML prototype and an API specification + implementation strategy.
+public site and its standalone `velo-melder.html` tool. A first working implementation now lives
+in `app/` (Symfony) — see "Status" below for how to run it. The `design-prototype/`, `api/`,
+`database/`, and `docs/` directories remain the design/API reference the implementation was built
+from and are not overwritten by it.
 
 ## What's here
 
 ```
+├── app/                # The real Symfony application -- admin UI + public/admin API, one
+│                        # codebase, one database (see docs/api-implementation-strategy.md). Run
+│                        # it per "Status" below.
 ├── design-prototype/   # Clickable HTML/CSS/JS prototype — open index.html in a browser
 │   ├── index.html          # entry point, links every screen below
 │   ├── login.html          # email + password
@@ -27,7 +31,7 @@ from: a clickable HTML prototype and an API specification + implementation strat
 │   ├── openapi.yaml    # source of truth — OpenAPI 3.0
 │   └── index.html      # human-readable render (Swagger UI, loads openapi.yaml, no build step)
 ├── database/
-│   └── schema.sql      # draft MariaDB schema, derived from openapi.yaml — see DATABASE.md
+│   └── schema.sql      # MariaDB schema, derived from openapi.yaml — see DATABASE.md
 ├── docs/
 │   └── api-implementation-strategy.md   # architecture decisions: one app vs. two, DB consistency
 └── DATABASE.md         # local MariaDB (Docker) setup + how to load schema.sql
@@ -81,5 +85,33 @@ see `docs/api-implementation-strategy.md` §7.
 
 ## Status
 
-Design/spec stage only. See `docs/api-implementation-strategy.md` for the recommended stack
-(PHP/Symfony) and architecture before any implementation starts.
+**A first working implementation exists and runs locally**, in `app/` (Symfony 8, PHP 8.5,
+Doctrine ORM/Migrations, Symfony Security). It implements the admin UI, the public API, the
+admin API, and the email+password+2FA auth flow against `database/schema.sql`'s real tables in
+MariaDB — see `docs/api-implementation-strategy.md` for the architecture it follows (one app, one
+service layer, one database).
+
+To run it locally:
+
+```bash
+docker start velowetzikon-backend-mariadb   # start the DB (see DATABASE.md if the container doesn't exist yet)
+php -S localhost:8001 -t app/public app/public/index.php
+```
+
+Then open `http://localhost:8001/login`. A seeded test admin account exists for local login —
+see `app/README.md`-equivalent notes below (credentials aren't committed to this file; they were
+reported at setup time and can be re-issued any time with
+`php app/bin/console app:create-admin-user <email> <password> [displayName]`).
+
+Deliberately simplified for this local-dev-only pass (documented here rather than silently):
+- **Anti-abuse** on `POST /reports` (`X-Challenge-Token`) is accepted but not verified — any
+  value is treated as valid, per the task's explicit scope. Real hCaptcha/Turnstile verification
+  is future work (see `docs/api-implementation-strategy.md` §5).
+- **2FA codes aren't emailed** (no SMTP configured locally) — they're logged via Monolog
+  (`app/var/log/dev.log`) and, in the `dev` environment only, shown directly on the verify page
+  as a labelled "Dev-Modus" banner so login is actually completable without email.
+- **The route editor** (`PUT /admin/routes`) is not implemented — `/routen` stays a stub page, per
+  README's "What's intentionally not designed yet" below (unchanged scope decision).
+- Reverse-geocoded `address`/`addressDistanceM` on submitted reports are always `null` — no
+  geocoding service is wired up; these fields exist in the schema/API for when one is.
+- `POST /auth/logout` skips CSRF-token validation (no CSRF wiring set up for this JSON-only flow).

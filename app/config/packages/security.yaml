@@ -1,0 +1,44 @@
+security:
+    # https://symfony.com/doc/current/security.html#registering-the-user-hashing-passwords
+    password_hashers:
+        App\Entity\AdminUser: 'auto'
+
+    # https://symfony.com/doc/current/security.html#loading-the-user-the-user-provider
+    providers:
+        admin_users:
+            entity:
+                class: App\Entity\AdminUser
+                property: email
+
+    firewalls:
+        dev:
+            # Ensure dev tools and static assets are always allowed
+            pattern: ^/(_profiler|_wdt|assets|build)/
+            security: false
+        main:
+            lazy: true
+            provider: admin_users
+            entry_point: App\Security\AdminAuthenticationEntryPoint
+            custom_authenticators:
+                - App\Security\LoginVerifyAuthenticator
+
+    # Note: Only the *first* matching rule is applied
+    access_control:
+        - { path: ^/admin, roles: ROLE_ADMIN }
+        - { path: ^/dashboard, roles: ROLE_ADMIN }
+        - { path: ^/meldungen, roles: ROLE_ADMIN }
+        - { path: ^/routen, roles: ROLE_ADMIN }
+        - { path: ^/auth/me, roles: ROLE_ADMIN }
+        - { path: ^/auth/logout, roles: ROLE_ADMIN }
+        - { path: ^/, roles: PUBLIC_ACCESS }
+
+when@test:
+    security:
+        password_hashers:
+            # Password hashers are resource-intensive by design to ensure security.
+            # In tests, it's safe to reduce their cost to improve performance.
+            App\Entity\AdminUser:
+                algorithm: auto
+                cost: 4 # Lowest possible value for bcrypt
+                time_cost: 3 # Lowest possible value for argon
+                memory_cost: 10 # Lowest possible value for argon

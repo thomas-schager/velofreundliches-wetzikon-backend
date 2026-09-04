@@ -1,11 +1,15 @@
 # Database
 
-No backend application exists yet (see `README.md`) — this doc covers getting a local MariaDB
-instance running and loading `database/schema.sql` into it, so the schema can be reviewed/queried
-concretely while the design work continues. Once the Symfony app exists, **Doctrine Migrations
-becomes the actual schema-change mechanism** (see `docs/api-implementation-strategy.md` §7) — this
-doc's `docker run`/load steps stay useful for local dev bootstrap, but `schema.sql` itself should
-be regenerated from the Doctrine entities at that point rather than hand-maintained in parallel.
+A working Symfony application now exists in `app/` (see `README.md`'s Status section) and runs
+against exactly this schema. This doc still covers getting a local MariaDB instance running and
+loading `database/schema.sql` into it from scratch; **Doctrine Migrations is now the actual
+schema-change mechanism** going forward (see `docs/api-implementation-strategy.md` §7) — a
+baseline migration (`app/migrations/Version20260903185437.php`) has already been generated via
+`doctrine:migrations:diff` and marked as applied (`doctrine:migrations:version --add`) *without*
+being executed, so the hand-loaded schema below stays byte-for-byte what's actually in the
+database, and any future entity change gets its own real, executed migration from this point on.
+`app/src/Entity/*.php` — not this file — is now the source of truth for the schema; re-derive
+`schema.sql` from the entities if it ever needs to be regenerated, rather than hand-editing both.
 
 ## Why MariaDB
 
@@ -93,10 +97,12 @@ docker exec velowetzikon-backend-mariadb mariadb -uroot -pgeheim velowetzikon_ba
 ```
 
 Expect 7 tables (`admin_users`, `auth_challenges`, `report_photos`, `reports`, `ratings`,
-`route_features`, `route_types`) and 5 seeded rows in `ratings`.
+`route_features`, `route_types`) plus Doctrine's own `doctrine_migration_versions` tracking table
+(8 total once the Symfony app has run migrations against it), and 5 seeded rows in `ratings`
+(9 in `route_types`).
 
 ## Where the connection settings come from
 
-Once the Symfony app exists, its `.env.local` `DATABASE_URL` should point at
-`127.0.0.1:3307`/`velowetzikon_backend`/`root`/`geheim` (or whatever superseded credentials you
-set) — matching this container, same convention as Contao's `DATABASE.md` for its own DB.
+`app/.env.local` (not committed) sets `DATABASE_URL` to
+`mysql://root:geheim@127.0.0.1:3307/velowetzikon_backend?serverVersion=mariadb-10.11.2&charset=utf8mb4`
+— matching this container, same convention as Contao's `DATABASE.md` for its own DB.
