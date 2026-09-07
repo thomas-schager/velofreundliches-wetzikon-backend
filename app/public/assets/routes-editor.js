@@ -107,12 +107,20 @@
     // ---------------------------------------------------------------------------------------
     var WAYPOINT_SIMPLIFY_TOLERANCE_M = 2;
 
+    // Returns { latlngs, originalIndices } -- originalIndices[i] is the index into the input
+    // `latlngs` array that output point i came from (Douglas-Peucker only ever keeps a subset
+    // of its input, never synthesizes new points, so every output point has exactly one such
+    // index). This is what lets an edit later patch just the moved point(s) back into the
+    // full-resolution stored geometry instead of replacing the whole line -- see
+    // finishVertexEdit()'s use of it.
     function simplifyLatLngs(latlngs, toleranceMeters) {
-      if (latlngs.length < 3) return latlngs;
+      if (latlngs.length < 3) {
+        return { latlngs: latlngs, originalIndices: latlngs.map(function (_, i) { return i; }) };
+      }
       var mPerDegLat = 111320;
       var mPerDegLng = 111320 * Math.cos(latlngs[0].lat * Math.PI / 180);
-      var xy = latlngs.map(function (ll) {
-        return { x: ll.lng * mPerDegLng, y: ll.lat * mPerDegLat, ll: ll };
+      var xy = latlngs.map(function (ll, i) {
+        return { x: ll.lng * mPerDegLng, y: ll.lat * mPerDegLat, ll: ll, idx: i };
       });
 
       function perpDist(pt, a, b) {
@@ -139,7 +147,11 @@
         return [a, b];
       }
 
-      return douglasPeucker(xy, toleranceMeters).map(function (p) { return p.ll; });
+      var simplified = douglasPeucker(xy, toleranceMeters);
+      return {
+        latlngs: simplified.map(function (p) { return p.ll; }),
+        originalIndices: simplified.map(function (p) { return p.idx; })
+      };
     }
 
     function bandWeight() {
@@ -292,12 +304,24 @@
       drawnItems.clearLayers();
       (fc.features || []).forEach(function (f) {
         if (!typesByKey[f.properties.type]) return; // unknown type -- skip rather than crash
-        var latlngs = f.geometry.coordinates.map(function (c) { return L.latLng(c[1], c[0]); });
-        latlngs = simplifyLatLngs(latlngs, WAYPOINT_SIMPLIFY_TOLERANCE_M);
-        var layer = L.polyline(latlngs, layerStyle(f.properties.type));
+        var rawLatlngs = f.geometry.coordinates.map(function (c) { return L.latLng(c[1], c[0]); });
+        var simplified = simplifyLatLngs(rawLatlngs, WAYPOINT_SIMPLIFY_TOLERANCE_M);
+        var layer = L.polyline(simplified.latlngs, layerStyle(f.properties.type));
         layer.routeType = f.properties.type;
         layer.routeDirection = f.properties.direction || 'one-way';
         layer.routeId = f.properties.id || null;
+        // The backend's modified-detection requires an exact point-count match before it even
+        // compares coordinate values (see RouteEditingService::coordinatesEqual()) -- so
+        // simplifying every route's geometry on load for editing/display, and then sending
+        // THAT (fewer-point) geometry back on save for routes nobody touched, made every save
+        // flag the whole network as "modified". Keep the untouched, as-received coordinates
+        // here (patched in place when a vertex actually moves, see finishVertexEdit()) and hand
+        // them back in buildProposedFeatureCollection() unless a structural edit (a point
+        // inserted or deleted) makes patching impossible, in which case geometryEdited falls
+        // back to sending the live, fully-simplified line instead.
+        layer.routeOriginalCoordinates = f.geometry.coordinates;
+        layer.simplifiedOriginalIndices = simplified.originalIndices;
+        layer.geometryEdited = false;
         drawnItems.addLayer(layer);
       });
       rebuildDecorators();
@@ -313,9 +337,12 @@
         var properties = { type: layer.routeType };
         if (!cfg.band && !cfg.noDirection) properties.direction = layer.routeDirection || 'one-way';
         if (layer.routeId) properties.id = layer.routeId;
+        var coordinates = (!layer.geometryEdited && layer.routeOriginalCoordinates)
+          ? layer.routeOriginalCoordinates
+          : lls.map(function (ll) { return [ll.lng, ll.lat]; });
         features.push({
           type: 'Feature',
-          geometry: { type: 'LineString', coordinates: lls.map(function (ll) { return [ll.lng, ll.lat]; }) },
+          geometry: { type: 'LineString', coordinates: coordinates },
           properties: properties
         });
       });
@@ -571,6 +598,90 @@
       layer.fire('revert-edited', { layer: layer });
     }
 
+    /** Reconciles a vertex-edit session against the full-resolution stored geometry, so the
+     *  save reflects exactly what changed -- moved points patched in place, inserted/deleted
+     *  points actually inserted/deleted -- instead of replacing the whole line with its
+     *  simplified-for-display version just because the point count changed during editing.
+     *
+     *  Dragging/inserting/deleting a vertex never reorders the others, so this is a standard
+     *  sequence-alignment (edit-distance) problem: find the cheapest way to turn `startLatLngs`
+     *  (the simplified points shown when this session began, each with a known index into
+     *  `originalCoordinates`) into `endLatLngs` (the same, after editing), where "cheap" means
+     *  matching two points that are geometrically close (a move) rather than treating both as a
+     *  delete+insert. GAP_COST_M is the threshold: aligning two points more than ~300m apart is
+     *  never worth it, so anything moved further than a real in-editor drag would plausibly go
+     *  is correctly treated as an unrelated deletion+insertion instead of one huge "move". */
+    function reconcileEditedGeometry(startLatLngs, startOriginalIndices, endLatLngs, originalCoordinates) {
+      var n = startLatLngs.length, m = endLatLngs.length;
+      var GAP_COST_M = 300;
+      var mPerDegLat = 111320;
+      var mPerDegLng = 111320 * Math.cos(startLatLngs[0].lat * Math.PI / 180);
+      function distMeters(a, b) {
+        var dx = (a.lng - b.lng) * mPerDegLng, dy = (a.lat - b.lat) * mPerDegLat;
+        return Math.hypot(dx, dy);
+      }
+
+      var dp = [], back = [];
+      for (var i = 0; i <= n; i++) { dp.push(new Array(m + 1)); back.push(new Array(m + 1)); }
+      dp[0][0] = 0;
+      for (i = 1; i <= n; i++) { dp[i][0] = i * GAP_COST_M; back[i][0] = 'del'; }
+      for (var j = 1; j <= m; j++) { dp[0][j] = j * GAP_COST_M; back[0][j] = 'ins'; }
+      for (i = 1; i <= n; i++) {
+        for (j = 1; j <= m; j++) {
+          var matchCost = dp[i - 1][j - 1] + distMeters(startLatLngs[i - 1], endLatLngs[j - 1]);
+          var delCost = dp[i - 1][j] + GAP_COST_M;
+          var insCost = dp[i][j - 1] + GAP_COST_M;
+          if (matchCost <= delCost && matchCost <= insCost) { dp[i][j] = matchCost; back[i][j] = 'match'; }
+          else if (delCost <= insCost) { dp[i][j] = delCost; back[i][j] = 'del'; }
+          else { dp[i][j] = insCost; back[i][j] = 'ins'; }
+        }
+      }
+
+      var ops = [];
+      i = n; j = m;
+      while (i > 0 || j > 0) {
+        var move = back[i][j];
+        if (move === 'match') { ops.push({ type: 'match', startIdx: i - 1, endIdx: j - 1 }); i--; j--; }
+        else if (move === 'del') { ops.push({ type: 'del', startIdx: i - 1 }); i--; }
+        else { ops.push({ type: 'ins', endIdx: j - 1 }); j--; }
+      }
+      ops.reverse();
+
+      // Apply from the highest original-array position down to the lowest, so an earlier
+      // mutation never invalidates a later (in this loop, i.e. lower-index) op's index.
+      var result = originalCoordinates.slice();
+      for (var k = ops.length - 1; k >= 0; k--) {
+        var op = ops[k];
+        if (op.type === 'match') {
+          var ll = endLatLngs[op.endIdx];
+          result[startOriginalIndices[op.startIdx]] = [ll.lng, ll.lat];
+        } else if (op.type === 'del') {
+          result.splice(startOriginalIndices[op.startIdx], 1);
+        } else {
+          var precedingOrigIdx = -1;
+          for (var p = k - 1; p >= 0; p--) {
+            if (ops[p].type === 'match') { precedingOrigIdx = startOriginalIndices[ops[p].startIdx]; break; }
+          }
+          var ll2 = endLatLngs[op.endIdx];
+          result.splice(precedingOrigIdx + 1, 0, [ll2.lng, ll2.lat]);
+        }
+      }
+
+      // Also report, for each endLatLngs[j], which index it now occupies in `result` -- so a
+      // second edit session on this same layer (before it's ever saved/reloaded) has an
+      // up-to-date map to reconcile against, the same way this one did. Independent of the
+      // backward splice loop above: walking ops forward and counting one output slot per
+      // match/ins (a 'del' produces no output entry) gives each point's final position
+      // directly, since endLatLngs is exactly that output sequence in order.
+      var endOriginalIndices = new Array(m);
+      var pos = 0;
+      for (var t = 0; t < ops.length; t++) {
+        if (ops[t].type === 'match' || ops[t].type === 'ins') { endOriginalIndices[ops[t].endIdx] = pos++; }
+      }
+
+      return { coordinates: result, originalIndices: endOriginalIndices };
+    }
+
     var currentDrawer = null;
     // Draw has two phases too: choosing (button clicked, type/direction picker shown, drawing
     // not yet possible) and drawing (currentDrawer armed, once a type has been confirmed).
@@ -638,7 +749,25 @@
         var changed = !latLngsEqual(current, vertexEditOriginalLatLngs);
         if (accept) {
           vertexEditLayer.editing.disable();
-          if (changed) markDirty();
+          if (changed) {
+            markDirty();
+            var indices = vertexEditLayer.simplifiedOriginalIndices;
+            var original = vertexEditLayer.routeOriginalCoordinates;
+            if (indices && original) {
+              // Reconcile against the full-resolution stored geometry -- moved points patched
+              // in place, inserted/deleted points actually inserted/deleted -- so untouched
+              // parts of the line stay byte-for-byte identical to what's in the database
+              // instead of the whole line being replaced by its simplified-for-display version
+              // (see renderFeatureCollection()) just because a point was added or removed.
+              var reconciled = reconcileEditedGeometry(vertexEditOriginalLatLngs, indices, current, original);
+              vertexEditLayer.routeOriginalCoordinates = reconciled.coordinates;
+              vertexEditLayer.simplifiedOriginalIndices = reconciled.originalIndices;
+            } else {
+              // No original geometry to reconcile against (shouldn't happen for a route loaded
+              // from the server, but keep a safe fallback) -- save the edited line as-is.
+              vertexEditLayer.geometryEdited = true;
+            }
+          }
         } else {
           revertLayerLatLngs(vertexEditLayer, vertexEditOriginalLatLngs);
           vertexEditLayer.editing.disable();

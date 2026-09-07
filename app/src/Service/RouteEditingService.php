@@ -316,13 +316,96 @@ class RouteEditingService
     }
 
     /**
+     * Aligns two ordered [lng, lat] coordinate sequences to tell "point moved" apart from
+     * "point inserted/removed". Waypoint edits (drag/insert/delete) never reorder the
+     * surrounding points, so this reduces to classic edit-distance sequence alignment --
+     * same principle as reconcileEditedGeometry() in routes-editor.js, which the frontend
+     * uses to patch the saved geometry after an edit session.
+     *
+     * @param array<int, array{0: float, 1: float}> $prev
+     * @param array<int, array{0: float, 1: float}> $prop
+     * @return array{moved: int, inserted: int, removed: int}
+     */
+    private function diffWaypoints(array $prev, array $prop): array
+    {
+        $n = count($prev);
+        $m = count($prop);
+        $gapCost = 300.0; // meters -- mirrors GAP_COST_M in routes-editor.js
+
+        $latRef = $prev[0][1] ?? ($prop[0][1] ?? 0.0);
+        $mPerDegLat = 111320.0;
+        $mPerDegLng = 111320.0 * cos(deg2rad($latRef));
+        $distance = function (array $a, array $b) use ($mPerDegLat, $mPerDegLng): float {
+            $dx = ($a[0] - $b[0]) * $mPerDegLng;
+            $dy = ($a[1] - $b[1]) * $mPerDegLat;
+            return sqrt($dx * $dx + $dy * $dy);
+        };
+
+        $dp = [];
+        $back = [];
+        for ($i = 0; $i <= $n; $i++) {
+            $dp[$i] = array_fill(0, $m + 1, 0.0);
+            $back[$i] = array_fill(0, $m + 1, '');
+        }
+        for ($i = 1; $i <= $n; $i++) {
+            $dp[$i][0] = $i * $gapCost;
+            $back[$i][0] = 'del';
+        }
+        for ($j = 1; $j <= $m; $j++) {
+            $dp[0][$j] = $j * $gapCost;
+            $back[0][$j] = 'ins';
+        }
+
+        for ($i = 1; $i <= $n; $i++) {
+            for ($j = 1; $j <= $m; $j++) {
+                $matchCost = $dp[$i - 1][$j - 1] + $distance($prev[$i - 1], $prop[$j - 1]);
+                $delCost = $dp[$i - 1][$j] + $gapCost;
+                $insCost = $dp[$i][$j - 1] + $gapCost;
+                if ($matchCost <= $delCost && $matchCost <= $insCost) {
+                    $dp[$i][$j] = $matchCost;
+                    $back[$i][$j] = 'match';
+                } elseif ($delCost <= $insCost) {
+                    $dp[$i][$j] = $delCost;
+                    $back[$i][$j] = 'del';
+                } else {
+                    $dp[$i][$j] = $insCost;
+                    $back[$i][$j] = 'ins';
+                }
+            }
+        }
+
+        $moved = 0;
+        $inserted = 0;
+        $removed = 0;
+        $i = $n;
+        $j = $m;
+        while ($i > 0 || $j > 0) {
+            $move = $back[$i][$j];
+            if ($move === 'match') {
+                if (abs($prev[$i - 1][0] - $prop[$j - 1][0]) > 1e-7 || abs($prev[$i - 1][1] - $prop[$j - 1][1]) > 1e-7) {
+                    $moved++;
+                }
+                $i--;
+                $j--;
+            } elseif ($move === 'del') {
+                $removed++;
+                $i--;
+            } else {
+                $inserted++;
+                $j--;
+            }
+        }
+
+        return ['moved' => $moved, 'inserted' => $inserted, 'removed' => $removed];
+    }
+
+    /**
      * @param array<string, \App\Entity\RouteType> $routeTypesByKey
      */
     private function buildSummary(array $entries, array $routeTypesByKey): array
     {
         $added = $removed = $modified = $unchanged = 0;
-        $byType = []; // routeTypeLabel => string[] lines, grouping for readability
-        $structured = [];
+        $byType = []; // routeTypeLabel => array{line: string, entry: array}[], grouping for readability
 
         foreach ($entries as $entry) {
             if ($entry['action'] === 'unchanged') {
@@ -353,20 +436,29 @@ class RouteEditingService
                     $changes[] = 'Richtung geändert von ' . $this->directionLabel($prev['direction']) . ' zu ' . $this->directionLabel($prop['direction']);
                 }
                 if (!$this->coordinatesEqual($prev['coordinates'], $prop['coordinates'])) {
-                    $changes[] = sprintf('Verlauf angepasst (%d → %d Punkte)', count($prev['coordinates']), count($prop['coordinates']));
+                    $line = sprintf('Verlauf angepasst (%d → %d Punkte)', count($prev['coordinates']), count($prop['coordinates']));
+                    $moved = $this->diffWaypoints($prev['coordinates'], $prop['coordinates'])['moved'];
+                    if ($moved > 0) {
+                        $line .= sprintf(', %d %s geändert', $moved, $moved === 1 ? 'Punkt' : 'Punkte');
+                    }
+                    $changes[] = $line;
                 }
                 $detail = $changes !== [] ? implode('; ', $changes) : 'geändert';
                 $line = "Strecke geändert ({$label}, bei {$location}): {$detail}";
             }
 
-            $byType[$label][] = $line;
-            $structured[] = array_merge(['label' => $label, 'location' => $location], $entry);
+            $byType[$label][] = [
+                'line' => $line,
+                'entry' => array_merge(['label' => $label, 'location' => $location], $entry),
+            ];
         }
 
         $lines = [];
-        foreach ($byType as $label => $groupLines) {
-            foreach ($groupLines as $line) {
-                $lines[] = $line;
+        $structured = [];
+        foreach ($byType as $label => $group) {
+            foreach ($group as $item) {
+                $lines[] = $item['line'];
+                $structured[] = $item['entry'];
             }
         }
 
