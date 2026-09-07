@@ -115,15 +115,15 @@
 </main>
 
 <div class="adm-sticky-actions" style="margin-left:var(--space-7);margin-right:var(--space-7);max-width:1320px;margin-inline:auto;">
-  <span class="adm-sticky-actions__status">Status: <strong id="stickyStatusText">
+  <span class="adm-sticky-actions__status" aria-live="polite">Status: <strong id="stickyStatusText">
     {% if report.status == 'published' %}Veröffentlicht
     {% elseif report.status == 'declined' %}Abgelehnt
     {% elseif report.status == 'pending_review' %}Neu — noch nicht geprüft
     {% else %}Ausstehend (E-Mail-Bestätigung){% endif %}
   </strong></span>
-  <button class="adm-btn adm-btn--danger" id="btnDecline"><i data-lucide="x" width="15" height="15"></i> Ablehnen</button>
-  <button class="adm-btn adm-btn--secondary" id="btnSave"><i data-lucide="save" width="15" height="15"></i> Änderungen speichern</button>
-  <button class="adm-btn adm-btn--primary" id="btnPublish"><i data-lucide="check" width="15" height="15"></i> Veröffentlichen</button>
+  <button class="adm-btn adm-btn--danger" id="btnDecline" {{ report.status == 'declined' ? 'disabled' : '' }} title="{{ report.status == 'declined' ? 'Bereits abgelehnt' : '' }}"><i data-lucide="x" width="15" height="15"></i> Ablehnen</button>
+  <button class="adm-btn adm-btn--secondary" id="btnSave" disabled title="Keine Änderungen zum Speichern"><i data-lucide="save" width="15" height="15"></i> Änderungen speichern</button>
+  <button class="adm-btn adm-btn--primary" id="btnPublish" {{ report.status == 'published' ? 'disabled' : '' }} title="{{ report.status == 'published' ? 'Bereits veröffentlicht' : '' }}"><i data-lucide="check" width="15" height="15"></i> Veröffentlichen</button>
 </div>
 {% endblock %}
 
@@ -146,6 +146,7 @@ document.addEventListener('DOMContentLoaded', function () {
       b.classList.toggle('is-selected', Number(b.dataset.r) === r);
     });
     if (marker) marker.setIcon(makeIcon(selectedRating));
+    checkDirty();
   }
   ratingEdit.querySelectorAll('button').forEach(function (btn) {
     btn.addEventListener('click', function () { selectRating(Number(btn.dataset.r)); });
@@ -154,6 +155,7 @@ document.addEventListener('DOMContentLoaded', function () {
   /* ---- Anonym toggle ---- */
   document.getElementById('anonField').addEventListener('change', function () {
     document.getElementById('nameField').disabled = this.checked;
+    checkDirty();
   });
 
   /* ---- Map (draggable pin) ----
@@ -202,6 +204,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var pos = marker.getLatLng();
     lat = pos.lat; lng = pos.lng;
     document.getElementById('kvLatLng').textContent = lat.toFixed(6) + ', ' + lng.toFixed(6);
+    checkDirty();
   });
 
   function currentPatch() {
@@ -215,6 +218,27 @@ document.addEventListener('DOMContentLoaded', function () {
       internalNote: document.getElementById('internalNoteField').value
     };
   }
+
+  /* ---- Change tracking -- "Änderungen speichern" only makes sense once something is
+     actually different from what's currently saved (same principle as the route editor's
+     isDirty: don't enable an action that would have no effect). "Veröffentlichen"/"Ablehnen"
+     are workflow actions, not save actions, so they're disabled only when already in that
+     target status (computed once server-side above), independent of field edits -- approving
+     a report shouldn't require touching a field first. */
+  var savedPatch = currentPatch();
+  var btnSave = document.getElementById('btnSave');
+  function patchesEqual(a, b) {
+    return a.lat === b.lat && a.lng === b.lng && a.rating === b.rating && a.comment === b.comment
+      && a.name === b.name && a.anonymous === b.anonymous && a.internalNote === b.internalNote;
+  }
+  function checkDirty() {
+    var dirty = !patchesEqual(currentPatch(), savedPatch);
+    btnSave.disabled = !dirty;
+    btnSave.title = dirty ? '' : 'Keine Änderungen zum Speichern';
+  }
+  document.getElementById('commentField').addEventListener('input', checkDirty);
+  document.getElementById('nameField').addEventListener('input', checkDirty);
+  document.getElementById('internalNoteField').addEventListener('input', checkDirty);
 
   function submitPatch(extra, onSuccess) {
     var body = Object.assign(currentPatch(), extra || {});
@@ -242,6 +266,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
   document.getElementById('btnSave').addEventListener('click', function () {
     submitPatch({}, function () {
+      savedPatch = currentPatch();
+      checkDirty();
       alert('Änderungen gespeichert.');
     });
   });

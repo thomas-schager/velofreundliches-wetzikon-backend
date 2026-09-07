@@ -66,6 +66,13 @@
     var drawnItems = new L.FeatureGroup().addTo(map);
     var decoratorGroup = L.layerGroup().addTo(map);
     var waypointGroup = L.layerGroup().addTo(map);
+    // Invisible, wider click targets -- see rebuildDecorators(). Kept out of drawnItems (and so
+    // out of buildProposedFeatureCollection()/anything else that treats "a drawnItems layer" as
+    // real route data) entirely; each hit line only ever exists to forward a click back to its
+    // real counterpart.
+    // Must be a FeatureGroup, not a plain LayerGroup -- only FeatureGroup forwards member
+    // layers' events (like 'click') up to the group's own .on() listener.
+    var hitAreaGroup = new L.FeatureGroup().addTo(map);
     map.on('zoomend', function () { rebuildDecorators(); });
 
     // ---------------------------------------------------------------------------------------
@@ -143,13 +150,31 @@
     function rebuildDecorators() {
       decoratorGroup.clearLayers();
       bandGroup.clearLayers();
-      if (typeof L.polylineDecorator === 'undefined') return;
+      hitAreaGroup.clearLayers();
+      var polylineDecoratorReady = typeof L.polylineDecorator !== 'undefined';
+
       drawnItems.eachLayer(function (layer) {
         if (!layer.getLatLngs) return;
         var typeKey = layer.routeType;
         var cfg = getTypeCfg(typeKey);
         var lls = flattenLatLngs(layer.getLatLngs());
         if (lls.length < 2 || hiddenTypes.has(typeKey)) return;
+
+        // Wider click target than the rendered line, so selecting/editing/deleting a route
+        // doesn't require hitting a thin few-pixel-wide stroke. For band types this matches
+        // the band's own rendered width -- the real editable line underneath is drawn at the
+        // same colour/opacity as the band, so it reads as part of it rather than as its own
+        // thin line, and widening its click area purely this far causes no visible change.
+        // For plain-line types there's no such backdrop, so this is a flat, generous
+        // tolerance instead. Fully transparent (not interactive:false -- it must still receive
+        // clicks) and deliberately NOT the layer being clicked: forwarded via _realLayer so
+        // drawnItems, and everything that iterates it as real route data, never sees this.
+        var hitWeight = cfg.band ? bandWeight() : Math.max(cfg.weight + 14, 18);
+        var hitLine = L.polyline(lls, { weight: hitWeight, opacity: 0, lineCap: 'round', lineJoin: 'round', pane: 'rt-' + typeKey });
+        hitLine._realLayer = layer;
+        hitLine.addTo(hitAreaGroup);
+
+        if (!polylineDecoratorReady) return;
 
         if (cfg.band) {
           var bw = bandWeight();
@@ -180,11 +205,13 @@
     }
 
     function applyTypeVisibility() {
+      // Every route type is drawn twice: a thin line here in drawnItems (the actual,
+      // interactive/editable layer) plus -- for band types only -- a separate thick
+      // decorative polyline rebuilt into bandGroup below. Hiding a type must hide both; only
+      // excluding band types from this loop left their thin line at full opacity with no band
+      // drawn behind it, i.e. still visible (just thinner than usual) after "hiding" it.
       drawnItems.eachLayer(function (layer) {
-        var cfg = getTypeCfg(layer.routeType);
-        if (!cfg.band) {
-          layer.setStyle(hiddenTypes.has(layer.routeType) ? { opacity: 0, weight: 0 } : layerStyle(layer.routeType));
-        }
+        layer.setStyle(hiddenTypes.has(layer.routeType) ? { opacity: 0, weight: 0 } : layerStyle(layer.routeType));
       });
       rebuildDecorators();
     }
@@ -238,10 +265,12 @@
     function markDirty() {
       isDirty = true;
       document.getElementById('routeStatusText').textContent = 'Ungespeicherte Änderungen';
+      updateActionButtonsEnabled();
     }
     function markClean(text) {
       isDirty = false;
       document.getElementById('routeStatusText').textContent = text || 'Keine ungespeicherten Änderungen';
+      updateActionButtonsEnabled();
     }
     window.addEventListener('beforeunload', function (e) {
       if (!isDirty) return;
@@ -331,7 +360,7 @@
         wrap.appendChild(pill);
       });
       selectedType = ROUTE_TYPES[0] ? ROUTE_TYPES[0].key : null;
-      updateDirectionVisibility();
+      updateEditorMode();
     }
 
     /** Visual-only: highlights a pill without mutating anything -- used when a route is
@@ -343,13 +372,15 @@
       var pillEl = document.querySelector('.adm-type-pill[data-type="' + key + '"]');
       if (pillEl) { pillEl.classList.add('is-active'); pillEl.style.setProperty('--active-color', getTypeCfg(key).color); }
       selectedType = key;
-      updateDirectionVisibility();
+      updateEditorMode();
     }
 
     /** Pill click handler: picks the type for the next drawn route, or -- if a route is
-     *  currently selected -- retypes that route (a real edit, marks dirty). */
+     *  currently selected -- retypes that route (a real edit, marks dirty). While choosing a
+     *  type for a new route, this is also the one required step before drawing is allowed. */
     function selectType(key) {
-      setActivePill(key);
+      if (drawChoosing) drawTypeConfirmed = true;
+      setActivePill(key); // calls updateEditorMode() -- runs after drawTypeConfirmed is set
       if (selectedLayer) {
         selectedLayer.routeType = key;
         selectedLayer.setStyle(layerStyle(key));
@@ -359,9 +390,104 @@
       }
     }
 
-    function updateDirectionVisibility() {
+    // ---------------------------------------------------------------------------------------
+    // Panel mode / state machine display. Exactly one of these is true at any time:
+    //   idle | draw (choosing type -> drawing) | route-selected |
+    //   vertex-edit (armed -> editing one layer) | delete (armed, staging)
+    // updateEditorMode() is the single place that reads that state and decides what the
+    // subpanel shows, which Aktionen buttons are clickable, and whether Speichern/Verwerfen
+    // are allowed -- so the visible UI is always a direct readout of the underlying state,
+    // never something that can drift from it.
+    // ---------------------------------------------------------------------------------------
+    function updateActionButtonsEnabled() {
+      var drawing = drawChoosing || !!currentDrawer;
+      var vertexEditing = vertexEditArmed || !!vertexEditLayer;
+      var deleting = deleteArmed;
+      var anyActive = drawing || vertexEditing || deleting;
+      document.getElementById('btnDrawRoute').disabled = anyActive && !drawing;
+      document.getElementById('btnEditVertices').disabled = anyActive && !vertexEditing;
+      document.getElementById('btnDeleteRoutes').disabled = anyActive && !deleting;
+
+      // The changeset as a whole can only be saved or discarded once any in-progress route
+      // action has itself been accepted or cancelled -- otherwise "Speichern"/"Verwerfen"
+      // would act on a route that's mid-edit, which has no well-defined meaning -- and only
+      // once there's actually something to save or discard in the first place.
+      var saveDisabled = anyActive || !isDirty;
+      var saveBtn = document.getElementById('btnSaveRoutes');
+      var discardBtn = document.getElementById('btnDiscard');
+      saveBtn.disabled = saveDisabled;
+      discardBtn.disabled = saveDisabled;
+      var reason = anyActive ? 'Erst die laufende Aktion abschliessen' : (!isDirty ? 'Keine Änderungen' : '');
+      saveBtn.title = reason;
+      discardBtn.title = reason;
+    }
+
+    function setSubpanelHint(msg) {
+      document.getElementById('subpanelHint').textContent = msg || '';
+    }
+
+    function updateEditorMode() {
+      var subpanel = document.getElementById('actionSubpanel');
+      var label = document.getElementById('subpanelLabel');
+      var typeGroup = document.getElementById('typeDirectionGroup');
+      var actions = document.getElementById('subpanelActions');
+      var idleHint = document.getElementById('editorIdleHint');
+      var acceptBtn = document.getElementById('btnSubpanelAccept');
       var cfg = getTypeCfg(selectedType);
-      document.getElementById('directionSection').style.display = (!cfg || cfg.band || cfg.noDirection) ? 'none' : 'block';
+      var directionRelevant = cfg && !cfg.band && !cfg.noDirection;
+
+      updateActionButtonsEnabled();
+      idleHint.textContent = '';
+      acceptBtn.disabled = false;
+
+      if (drawChoosing || currentDrawer) {
+        subpanel.classList.add('is-open');
+        label.textContent = 'Neue Route zeichnen';
+        typeGroup.style.display = 'block';
+
+        if (currentDrawer) {
+          document.getElementById('directionSection').style.display = directionRelevant ? 'block' : 'none';
+          actions.classList.remove('is-open');
+          setSubpanelHint('Punkte klicken · Doppelklick abschliessen · Nochmals klicken auf „Neue Route zeichnen" oder ESC zum Abbrechen.');
+        } else {
+          document.getElementById('directionSection').style.display = (drawTypeConfirmed && directionRelevant) ? 'block' : 'none';
+          actions.classList.add('is-open');
+          acceptBtn.textContent = 'Zeichnen starten';
+          acceptBtn.disabled = !drawTypeConfirmed;
+          setSubpanelHint(drawTypeConfirmed
+            ? 'Richtung prüfen (falls zutreffend) und „Zeichnen starten" klicken.'
+            : 'Routen-Typ auswählen, um mit dem Zeichnen zu beginnen.');
+        }
+      } else if (vertexEditArmed || vertexEditLayer) {
+        subpanel.classList.add('is-open');
+        label.textContent = 'Wegpunkte bearbeiten';
+        typeGroup.style.display = 'none';
+        if (vertexEditLayer) {
+          actions.classList.add('is-open');
+          acceptBtn.textContent = 'Übernehmen';
+          setSubpanelHint('Punkt ziehen: verschieben · Punkt anklicken: löschen · Mittelpunkt ziehen: neuen Punkt einfügen.');
+        } else {
+          actions.classList.remove('is-open');
+          setSubpanelHint('Route auf der Karte anklicken, um ihre Wegpunkte zu bearbeiten.');
+        }
+      } else if (deleteArmed) {
+        subpanel.classList.add('is-open');
+        label.textContent = 'Route löschen';
+        typeGroup.style.display = 'none';
+        actions.classList.add('is-open');
+        acceptBtn.textContent = stagedForDeletion.size ? 'Fertig (' + stagedForDeletion.size + ')' : 'Fertig';
+        setSubpanelHint('Route(n) anklicken, um sie zur Löschung zu markieren (rot umrandet) · nochmals anklicken zum Entmarkieren · „Fertig" löscht die markierten Routen endgültig.');
+      } else if (selectedLayer) {
+        subpanel.classList.add('is-open');
+        label.textContent = 'Ausgewählte Route';
+        typeGroup.style.display = 'block';
+        document.getElementById('directionSection').style.display = directionRelevant ? 'block' : 'none';
+        actions.classList.remove('is-open');
+        setSubpanelHint('');
+      } else {
+        subpanel.classList.remove('is-open');
+        idleHint.textContent = 'Route auf der Karte auswählen oder eine neue zeichnen.';
+      }
     }
 
     document.querySelectorAll('input[name="admDir"]').forEach(function (radio) {
@@ -375,14 +501,8 @@
       });
     });
 
-    function setEditorHint(msg) {
-      var el = document.getElementById('editorHint');
-      el.textContent = msg;
-      el.classList.toggle('visible', !!msg);
-    }
-
     // ---------------------------------------------------------------------------------------
-    // Selection + waypoint markers
+    // Selection + waypoint markers -- plain "look at / retype this route" outside of any tool.
     // ---------------------------------------------------------------------------------------
     function selectRoute(layer) {
       highlightGroup.clearLayers();
@@ -404,12 +524,14 @@
       if (dirRadio) dirRadio.checked = true;
 
       selectedLayer = layer; // set last -- see setActivePill's docblock
+      updateEditorMode(); // re-run now that selectedLayer reflects the new selection
     }
 
     function clearSelection() {
       highlightGroup.clearLayers();
       waypointGroup.clearLayers();
       selectedLayer = null;
+      updateEditorMode();
     }
 
     // ---------------------------------------------------------------------------------------
@@ -426,38 +548,184 @@
       document.head.appendChild(l);
     }
 
-    var currentDrawer = null, editHandler = null, deleteHandler = null;
+    function latLngsEqual(a, b) {
+      if (a.length !== b.length) return false;
+      for (var i = 0; i < a.length; i++) {
+        if (a[i].lat !== b[i].lat || a[i].lng !== b[i].lng) return false;
+      }
+      return true;
+    }
 
+    /** Reverts a layer's geometry after a cancelled vertex edit. Plain layer.setLatLngs() is
+     *  not enough: leaflet-draw's L.Edit.Poly caches a reference to the polyline's _latlngs
+     *  array once, when the layer is first constructed, and only re-reads it in response to a
+     *  'revert-edited' event fired on the layer -- setLatLngs() reassigns _latlngs to a new
+     *  array rather than mutating the old one in place, so without this event the line itself
+     *  reverts correctly (it renders straight from the new array) but the *next* time editing
+     *  is enabled on this layer, its vertex handles are rebuilt from the stale pre-revert
+     *  array, i.e. the position of the very drag that was just cancelled.
+     *  https://github.com/Leaflet/Leaflet.draw -- L.Edit.Poly's own documented mechanism for
+     *  exactly this situation, not a workaround. */
+    function revertLayerLatLngs(layer, latlngs) {
+      layer.setLatLngs(latlngs);
+      layer.fire('revert-edited', { layer: layer });
+    }
+
+    var currentDrawer = null;
+    // Draw has two phases too: choosing (button clicked, type/direction picker shown, drawing
+    // not yet possible) and drawing (currentDrawer armed, once a type has been confirmed).
+    var drawChoosing = false, drawTypeConfirmed = false;
+    // Vertex-edit has two phases: armed (button clicked, waiting for a route to be picked on
+    // the map) and editing (a single layer's own `.editing` handler -- attached to every
+    // polyline by leaflet-draw's addInitHook, see the boot comment below -- is enabled
+    // directly, scoped to just that route rather than the whole network).
+    var vertexEditArmed = false, vertexEditLayer = null, vertexEditOriginalLatLngs = null, vertexEditWasDirty = false;
+    // Delete is staging-based, not leaflet-draw's own remove-on-click Delete handler: clicking
+    // a route while armed doesn't remove it yet, just marks it (a dashed red outline, added to
+    // highlightGroup) so the user can see exactly what's about to be deleted and change their
+    // mind before confirming. stagedForDeletion maps each marked layer to its outline layer so
+    // either can be found from the other.
+    var deleteArmed = false;
+    var stagedForDeletion = new Map();
+
+    // Any in-progress action that gets interrupted (switching tools, discarding, restoring a
+    // backup) is treated as a cancel, never an implicit accept -- silently keeping an
+    // unreviewed edit would be surprising. The only way to *accept* is the explicit action
+    // (clicking the active button again, or "Übernehmen"/"Zeichnen starten"/"Fertig").
     function stopAll() {
       clearSelection();
       if (currentDrawer) { currentDrawer.disable(); currentDrawer = null; }
-      if (editHandler) { editHandler.save(); editHandler.disable(); editHandler = null; rebuildDecorators(); }
-      if (deleteHandler) { deleteHandler.save(); deleteHandler.disable(); deleteHandler = null; rebuildDecorators(); buildLegend(); }
+      drawChoosing = false;
+      drawTypeConfirmed = false;
+      if (vertexEditLayer) { vertexEditLayer.editing.disable(); revertLayerLatLngs(vertexEditLayer, vertexEditOriginalLatLngs); vertexEditLayer = null; rebuildDecorators(); }
+      vertexEditArmed = false;
+      if (stagedForDeletion.size) { stagedForDeletion.forEach(function (hl) { highlightGroup.removeLayer(hl); }); stagedForDeletion.clear(); }
+      deleteArmed = false;
       ['btnDrawRoute', 'btnEditVertices', 'btnDeleteRoutes'].forEach(function (id) {
         document.getElementById(id).classList.remove('is-active');
       });
       mapEl.classList.remove('is-drawing', 'is-editing');
-      setEditorHint('');
+      updateEditorMode();
+    }
+
+    function beginActualDrawing() {
+      drawChoosing = false;
+      currentDrawer = new L.Draw.Polyline(map, { shapeOptions: layerStyle(selectedType) });
+      currentDrawer.enable();
+      mapEl.classList.add('is-drawing');
+      updateEditorMode();
+    }
+
+    function beginVertexEdit(layer) {
+      vertexEditArmed = false;
+      vertexEditLayer = layer;
+      vertexEditWasDirty = isDirty;
+      vertexEditOriginalLatLngs = flattenLatLngs(layer.getLatLngs()).map(function (ll) { return L.latLng(ll.lat, ll.lng); });
+
+      highlightGroup.clearLayers();
+      var cfg = getTypeCfg(layer.routeType);
+      var w = cfg.band ? bandWeight() + 8 : cfg.weight + 8;
+      L.polyline(vertexEditOriginalLatLngs, { color: '#dc3406', weight: w, opacity: 0.35, lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(highlightGroup);
+
+      layer.editing.enable();
+      mapEl.classList.add('is-editing');
+      updateEditorMode();
+    }
+
+    function finishVertexEdit(accept) {
+      if (vertexEditLayer) {
+        var current = flattenLatLngs(vertexEditLayer.getLatLngs());
+        var changed = !latLngsEqual(current, vertexEditOriginalLatLngs);
+        if (accept) {
+          vertexEditLayer.editing.disable();
+          if (changed) markDirty();
+        } else {
+          revertLayerLatLngs(vertexEditLayer, vertexEditOriginalLatLngs);
+          vertexEditLayer.editing.disable();
+          if (vertexEditWasDirty) markDirty(); else markClean();
+        }
+        vertexEditLayer = null;
+        rebuildDecorators();
+      }
+      vertexEditArmed = false;
+      highlightGroup.clearLayers();
+      mapEl.classList.remove('is-editing');
+      document.getElementById('btnEditVertices').classList.remove('is-active');
+      updateEditorMode();
+    }
+
+    /** Toggles whether `layer` is marked for deletion -- click once to mark (dashed red
+     *  outline appears), click again to unmark. Nothing is actually removed until "Fertig". */
+    function toggleStagedForDeletion(layer) {
+      if (stagedForDeletion.has(layer)) {
+        highlightGroup.removeLayer(stagedForDeletion.get(layer));
+        stagedForDeletion.delete(layer);
+      } else {
+        var lls = flattenLatLngs(layer.getLatLngs());
+        var cfg = getTypeCfg(layer.routeType);
+        var w = (cfg.band ? bandWeight() : cfg.weight) + 6;
+        var outline = L.polyline(lls, { color: '#dc3406', weight: w, opacity: 0.9, dashArray: '6 6', lineCap: 'round', lineJoin: 'round', interactive: false });
+        outline.addTo(highlightGroup);
+        stagedForDeletion.set(layer, outline);
+      }
+      updateEditorMode();
+    }
+
+    function finishDelete(accept) {
+      if (accept && stagedForDeletion.size) {
+        stagedForDeletion.forEach(function (outline, layer) {
+          drawnItems.removeLayer(layer);
+          highlightGroup.removeLayer(outline);
+        });
+        markDirty();
+        rebuildDecorators();
+        buildLegend();
+      } else {
+        stagedForDeletion.forEach(function (outline) { highlightGroup.removeLayer(outline); });
+      }
+      stagedForDeletion.clear();
+      deleteArmed = false;
+      document.getElementById('btnDeleteRoutes').classList.remove('is-active');
+      updateEditorMode();
     }
 
     function initTools() {
       document.getElementById('btnDrawRoute').addEventListener('click', function () {
-        if (currentDrawer) { stopAll(); return; }
+        if (drawChoosing || currentDrawer) { stopAll(); return; }
         stopAll();
-        currentDrawer = new L.Draw.Polyline(map, { shapeOptions: layerStyle(selectedType) });
-        currentDrawer.enable();
+        drawChoosing = true;
+        drawTypeConfirmed = false;
+        // No pill should look pre-selected -- the whole point of this phase is that the user
+        // hasn't chosen a type yet, so nothing should imply otherwise.
+        document.querySelectorAll('.adm-type-pill').forEach(function (p) {
+          p.classList.remove('is-active'); p.style.removeProperty('--active-color');
+        });
         this.classList.add('is-active');
-        mapEl.classList.add('is-drawing');
-        setEditorHint('Punkte klicken · Doppelklick abschliessen · ESC abbrechen');
+        updateEditorMode();
       });
 
       var justSelected = false;
-      drawnItems.on('click', function (e) {
-        if (e.layer && !currentDrawer && !editHandler && !deleteHandler) {
-          selectRoute(e.layer);
+      // Single dispatch point for "a route was clicked", regardless of whether the click
+      // landed on the route's own (possibly thin) rendered line in drawnItems or on its wider
+      // invisible hit target in hitAreaGroup -- see rebuildDecorators().
+      function handleRouteClick(layer) {
+        if (deleteArmed) {
+          toggleStagedForDeletion(layer);
+          justSelected = true;
+          return;
+        }
+        if (vertexEditArmed && !vertexEditLayer) {
+          beginVertexEdit(layer);
+          justSelected = true;
+          return;
+        }
+        if (!currentDrawer && !drawChoosing && !vertexEditArmed && !vertexEditLayer && !deleteArmed) {
+          selectRoute(layer);
           justSelected = true;
         }
-      });
+      }
+      drawnItems.on('click', function (e) { if (e.layer) handleRouteClick(e.layer); });
+      hitAreaGroup.on('click', function (e) { if (e.layer && e.layer._realLayer) handleRouteClick(e.layer._realLayer); });
       map.on('click', function () {
         if (justSelected) { justSelected = false; return; }
         clearSelection();
@@ -474,38 +742,47 @@
         rebuildDecorators();
         buildLegend();
         currentDrawer = null;
+        drawChoosing = false;
+        drawTypeConfirmed = false;
         document.getElementById('btnDrawRoute').classList.remove('is-active');
         mapEl.classList.remove('is-drawing');
-        setEditorHint('');
+        updateEditorMode();
       });
       map.on('draw:drawstop', function () {
         currentDrawer = null;
+        drawChoosing = false;
+        drawTypeConfirmed = false;
         document.getElementById('btnDrawRoute').classList.remove('is-active');
         mapEl.classList.remove('is-drawing');
-        setEditorHint('');
+        updateEditorMode();
       });
 
       document.getElementById('btnEditVertices').addEventListener('click', function () {
-        if (editHandler) { stopAll(); return; }
+        if (vertexEditArmed || vertexEditLayer) { finishVertexEdit(true); return; }
         stopAll();
-        editHandler = new L.EditToolbar.Edit(map, { featureGroup: drawnItems });
-        editHandler.enable();
+        vertexEditArmed = true;
         this.classList.add('is-active');
-        mapEl.classList.add('is-editing');
-        setEditorHint('Punkte verschieben · Nochmals klicken zum Übernehmen');
+        updateEditorMode();
       });
 
       document.getElementById('btnDeleteRoutes').addEventListener('click', function () {
-        if (deleteHandler) { stopAll(); return; }
+        if (deleteArmed) { finishDelete(true); return; }
         stopAll();
-        deleteHandler = new L.EditToolbar.Delete(map, { featureGroup: drawnItems });
-        deleteHandler.enable();
+        deleteArmed = true;
         this.classList.add('is-active');
-        setEditorHint('Route anklicken · Nochmals klicken zum Bestätigen');
+        updateEditorMode();
       });
 
-      map.on('draw:edited', function () { markDirty(); rebuildDecorators(); });
-      map.on('draw:deleted', function () { markDirty(); rebuildDecorators(); buildLegend(); });
+      document.getElementById('btnSubpanelAccept').addEventListener('click', function () {
+        if (vertexEditLayer) { finishVertexEdit(true); return; }
+        if (deleteArmed) { finishDelete(true); return; }
+        if (drawChoosing && drawTypeConfirmed) { beginActualDrawing(); return; }
+      });
+      document.getElementById('btnSubpanelCancel').addEventListener('click', function () {
+        if (vertexEditArmed || vertexEditLayer) { finishVertexEdit(false); return; }
+        if (deleteArmed) { finishDelete(false); return; }
+        if (drawChoosing) { stopAll(); return; }
+      });
     }
 
     document.getElementById('btnDiscard').addEventListener('click', function () {
@@ -602,7 +879,7 @@
         if (line.indexOf('- ') === 0) {
           bullets.push(line.slice(2));
         } else if (line.trim() !== '') {
-          label = line; // the "Wiederherstellung von Sicherung #N (...)" prefix, if present
+          label = line; // the "Wiederherstellung von Version #N (...)" prefix, if present
         }
       });
       return { label: label, bullets: bullets };
@@ -612,7 +889,7 @@
       var list = document.getElementById('backupsList');
       list.innerHTML = '';
       if (!items.length) {
-        list.innerHTML = '<p style="color:var(--color-muted);font-size:12px;">Noch keine Sicherungen -- die erste wird beim nächsten Speichern angelegt.</p>';
+        list.innerHTML = '<p style="color:var(--color-muted);font-size:12px;">Noch keine Versionen -- die erste wird beim nächsten Speichern angelegt.</p>';
         return;
       }
       items.forEach(function (b) {
@@ -662,7 +939,7 @@
         btn.className = 'adm-btn adm-btn--secondary adm-btn--sm adm-btn--block';
         btn.textContent = 'Wiederherstellen';
         btn.addEventListener('click', function () {
-          if (!confirm('Stand vom ' + date.toLocaleString('de-CH') + ' wiederherstellen? Der aktuelle Stand wird dabei automatisch als neue Sicherung abgelegt.')) return;
+          if (!confirm('Stand vom ' + date.toLocaleString('de-CH') + ' wiederherstellen? Der aktuelle Stand wird dabei automatisch als neue Version abgelegt.')) return;
           fetch('/admin/routes/backups/' + b.id + '/restore', { method: 'POST' })
             .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
             .then(function (result) {
@@ -671,7 +948,7 @@
               renderFeatureCollection(result.data);
               markClean();
               loadBackups();
-              showToast('Sicherung wiederhergestellt.');
+              showToast('Version wiederhergestellt.');
             })
             .catch(function () { alert('Verbindung zum Server fehlgeschlagen.'); });
         });

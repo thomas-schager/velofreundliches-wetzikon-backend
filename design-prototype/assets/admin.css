@@ -485,7 +485,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
 .adm-editor-section { padding: 10px; border-bottom: 1px solid var(--color-border); }
 .adm-editor-section:last-child { border-bottom: none; }
 .adm-editor-section-label { font: 700 10px var(--font-body); text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-muted); margin-bottom: 7px; }
-.adm-type-pills { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.adm-type-pills { display: flex; flex-direction: column; gap: 4px; }
 .adm-type-pill {
   display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-sm);
   border: 1.5px solid var(--color-border); background: var(--color-surface); cursor: pointer;
@@ -513,8 +513,36 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
 .adm-editor-btn.is-active { background: var(--color-secondary); color: #fff; border-color: var(--color-secondary); }
 .adm-editor-btn--danger { color: var(--color-danger); }
 .adm-editor-btn--danger:hover { background: var(--color-primary-tint); border-color: var(--color-danger); }
-.adm-editor-hint { padding: 0 10px 8px; font-size: 11px; color: var(--color-muted); line-height: 1.45; display: none; }
-.adm-editor-hint.visible { display: block; }
+/* Only the button for the currently active Aktion (if any) stays clickable -- the other two
+   grey out, so "which mode am I in" and "what can I do right now" always match. */
+.adm-editor-btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+
+/* Appears directly under Aktionen, touching its bottom edge (no border-bottom on that
+   section + no border-top here) and carrying the active button's accent color on its left
+   edge -- reads as "belongs to the Aktionen block above", not a separate top-level section. */
+.adm-editor-subpanel {
+  display: none;
+  margin: 0 10px 10px;
+  padding: 9px 10px 10px 11px;
+  border: 1px solid var(--color-border);
+  border-top: none;
+  border-left: 3px solid var(--color-secondary);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: var(--color-surface-2);
+}
+.adm-editor-subpanel.is-open { display: block; }
+.adm-editor-subpanel__label { font: 700 10px var(--font-body); text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-secondary); margin-bottom: 5px; }
+.adm-editor-subhint { font-size: 11px; color: var(--color-muted); line-height: 1.45; margin: 0 0 2px; }
+.adm-editor-subhint:empty { display: none; }
+.adm-editor-subactions { display: none; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+.adm-editor-subactions.is-open { display: flex; }
+/* Overrides .adm-btn--block's width:100% -- side by side when the column is wide enough to
+   fit both labels, each growing to fill its own row once flex-wrap pushes it there instead
+   of overflowing the narrow editor column. */
+.adm-editor-subactions .adm-btn { flex: 1 1 auto; width: auto; }
+
+.adm-editor-idle-hint { padding: 10px; font-size: 11px; color: var(--color-muted); line-height: 1.45; }
+.adm-editor-idle-hint:empty { display: none; padding: 0; }
 
 .adm-wp-marker { position: relative; }
 .adm-wp-label {

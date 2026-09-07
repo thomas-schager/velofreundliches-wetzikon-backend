@@ -127,7 +127,7 @@ class RouteEditingService
             throw new RouteBackupNotFoundException("Backup #{$backupId}'s snapshot file is unreadable.");
         }
 
-        $label = sprintf('Wiederherstellung von Sicherung #%d (%s)', $backupId, $backup->getCreatedAt()->format('d.m.Y, H:i'));
+        $label = sprintf('Wiederherstellung von Version #%d (%s)', $backupId, $backup->getCreatedAt()->format('d.m.Y, H:i'));
 
         return $this->save($geoJson, $admin, $label);
     }

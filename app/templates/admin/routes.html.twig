@@ -21,21 +21,6 @@
         <div class="adm-editor-panel__head">✎&ensp;Velonetz bearbeiten</div>
 
         <div class="adm-editor-section">
-          <div class="adm-editor-section-label">Routen-Typ</div>
-          <div class="adm-type-pills" id="typePills">
-            <p style="color:var(--color-muted);font-size:12px;">Lädt …</p>
-          </div>
-        </div>
-
-        <div class="adm-editor-section" id="directionSection">
-          <div class="adm-editor-section-label">Richtung</div>
-          <div class="adm-dir-options">
-            <label class="adm-dir-opt"><input type="radio" name="admDir" value="one-way" checked> Einbahn &rarr;</label>
-            <label class="adm-dir-opt"><input type="radio" name="admDir" value="both-ways"> Beide Richtungen &harr;</label>
-          </div>
-        </div>
-
-        <div class="adm-editor-section">
           <div class="adm-editor-section-label">Aktionen</div>
           <div class="adm-editor-actions">
             <button class="adm-editor-btn" id="btnDrawRoute" type="button"><i data-lucide="plus" width="14" height="14"></i> Neue Route zeichnen</button>
@@ -44,7 +29,34 @@
           </div>
         </div>
 
-        <div class="adm-editor-hint" id="editorHint"></div>
+        <!-- Subordinate to whichever Aktionen button triggered it -- shows only the type/
+             direction pickers, hint text and accept/cancel actions relevant to that one
+             action's current state. Hidden entirely when idle. -->
+        <div class="adm-editor-subpanel" id="actionSubpanel">
+          <div class="adm-editor-subpanel__label" id="subpanelLabel"></div>
+          <p class="adm-editor-subhint" id="subpanelHint"></p>
+
+          <div id="typeDirectionGroup">
+            <div class="adm-editor-section-label" style="margin-top:6px;">Routen-Typ</div>
+            <div class="adm-type-pills" id="typePills">
+              <p style="color:var(--color-muted);font-size:12px;">Lädt …</p>
+            </div>
+            <div id="directionSection">
+              <div class="adm-editor-section-label" style="margin-top:8px;">Richtung</div>
+              <div class="adm-dir-options">
+                <label class="adm-dir-opt"><input type="radio" name="admDir" value="one-way" checked> Einbahn &rarr;</label>
+                <label class="adm-dir-opt"><input type="radio" name="admDir" value="both-ways"> Beide Richtungen &harr;</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="adm-editor-subactions" id="subpanelActions">
+            <button class="adm-btn adm-btn--primary adm-btn--sm adm-btn--block" id="btnSubpanelAccept" type="button">Übernehmen</button>
+            <button class="adm-btn adm-btn--secondary adm-btn--sm adm-btn--block" id="btnSubpanelCancel" type="button">Abbrechen</button>
+          </div>
+        </div>
+
+        <p class="adm-editor-idle-hint" id="editorIdleHint"></p>
       </div>
     </aside>
 
@@ -63,8 +75,8 @@
     </div>
 
     <aside class="adm-routes-col adm-routes-col--backups">
-      <div class="adm-editor-panel__head"><i data-lucide="history" width="13" height="13" style="vertical-align:-2px;"></i>&ensp;Sicherungen</div>
-      <p class="adm-backups-panel__note">Vor jeder Speicherung wird der bisherige Stand als GeoJSON gesichert. Wiederherstellen erstellt selbst wieder eine neue Sicherung.</p>
+      <div class="adm-editor-panel__head"><i data-lucide="history" width="13" height="13" style="vertical-align:-2px;"></i>&ensp;Versionsverlauf</div>
+      <p class="adm-backups-panel__note">Vor jeder Speicherung wird der bisherige Stand gesichert. Wiederherstellen erstellt selbst wieder eine neue Version.</p>
       <div class="adm-backups-list" id="backupsList">
         <p style="color:var(--color-muted);font-size:12px;">Lädt …</p>
       </div>
@@ -73,7 +85,7 @@
 </main>
 
 <div class="adm-sticky-actions" style="margin-left:var(--space-7);margin-right:var(--space-7);">
-  <span class="adm-sticky-actions__status" id="routeStatusText">Lädt Routen …</span>
+  <span class="adm-sticky-actions__status" id="routeStatusText" aria-live="polite">Lädt Routen …</span>
   <button class="adm-btn adm-btn--secondary" id="btnDiscard" type="button"><i data-lucide="rotate-ccw" width="15" height="15"></i> Verwerfen</button>
   <button class="adm-btn adm-btn--primary" id="btnSaveRoutes"><i data-lucide="save" width="15" height="15"></i> Speichern</button>
 </div>
