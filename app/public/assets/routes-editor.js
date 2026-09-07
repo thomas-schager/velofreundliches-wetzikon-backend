@@ -86,6 +86,55 @@
       return (lls[0] instanceof L.LatLng) ? lls : (lls[0] || []);
     }
 
+    // ---------------------------------------------------------------------------------------
+    // Waypoint simplification (Douglas-Peucker, real-world meters). Some stored routes --
+    // notably the wider "vorschlag-gelbes-band" ones -- carry a smoothed curve baked into their
+    // coordinates from before this editor existed (sub-metre point spacing, hundreds of points
+    // per route), not the real hand-placed waypoints. Editing/saving that dense curve directly
+    // is exactly what made past exports of velo-routes.geojson balloon in size. Simplifying on
+    // load means the editor only ever shows/moves real corner vertices, and any route that gets
+    // edited and saved from here on is naturally cleaned up instead of staying (or growing)
+    // bloated. WAYPOINT_SIMPLIFY_TOLERANCE_M is deliberately small -- it only collapses points
+    // that are within ~2m of the straight line between their neighbours, invisible at any normal
+    // map zoom, while leaving genuine shape detail (real turns/bends) untouched.
+    // ---------------------------------------------------------------------------------------
+    var WAYPOINT_SIMPLIFY_TOLERANCE_M = 2;
+
+    function simplifyLatLngs(latlngs, toleranceMeters) {
+      if (latlngs.length < 3) return latlngs;
+      var mPerDegLat = 111320;
+      var mPerDegLng = 111320 * Math.cos(latlngs[0].lat * Math.PI / 180);
+      var xy = latlngs.map(function (ll) {
+        return { x: ll.lng * mPerDegLng, y: ll.lat * mPerDegLat, ll: ll };
+      });
+
+      function perpDist(pt, a, b) {
+        var dx = b.x - a.x, dy = b.y - a.y;
+        var lenSq = dx * dx + dy * dy;
+        if (lenSq === 0) return Math.hypot(pt.x - a.x, pt.y - a.y);
+        var t = Math.max(0, Math.min(1, ((pt.x - a.x) * dx + (pt.y - a.y) * dy) / lenSq));
+        return Math.hypot(pt.x - (a.x + t * dx), pt.y - (a.y + t * dy));
+      }
+
+      function douglasPeucker(points, tol) {
+        if (points.length < 3) return points;
+        var maxDist = 0, index = 0;
+        var a = points[0], b = points[points.length - 1];
+        for (var i = 1; i < points.length - 1; i++) {
+          var d = perpDist(points[i], a, b);
+          if (d > maxDist) { maxDist = d; index = i; }
+        }
+        if (maxDist > tol) {
+          var left = douglasPeucker(points.slice(0, index + 1), tol);
+          var right = douglasPeucker(points.slice(index), tol);
+          return left.slice(0, -1).concat(right);
+        }
+        return [a, b];
+      }
+
+      return douglasPeucker(xy, toleranceMeters).map(function (p) { return p.ll; });
+    }
+
     function bandWeight() {
       var mpp = 40075016.686 * Math.cos(47.32 * Math.PI / 180) / Math.pow(2, map.getZoom() + 8);
       return Math.max(6, Math.round(10 / mpp));
@@ -214,7 +263,8 @@
       drawnItems.clearLayers();
       (fc.features || []).forEach(function (f) {
         if (!typesByKey[f.properties.type]) return; // unknown type -- skip rather than crash
-        var latlngs = f.geometry.coordinates.map(function (c) { return [c[1], c[0]]; });
+        var latlngs = f.geometry.coordinates.map(function (c) { return L.latLng(c[1], c[0]); });
+        latlngs = simplifyLatLngs(latlngs, WAYPOINT_SIMPLIFY_TOLERANCE_M);
         var layer = L.polyline(latlngs, layerStyle(f.properties.type));
         layer.routeType = f.properties.type;
         layer.routeDirection = f.properties.direction || 'one-way';
@@ -639,7 +689,15 @@
     }
 
     // ---------------------------------------------------------------------------------------
-    // Boot: route types -> panes/pills -> current network -> draw tools
+    // Boot: route types -> panes/pills -> draw tools -> current network -> wire up tools
+    //
+    // leaflet-draw must finish loading BEFORE any route polyline is created: it patches
+    // L.Polyline via addInitHook, which only attaches the `.editing` handler to instances
+    // constructed *after* the hook is registered, not retroactively. Creating the network's
+    // polylines first (as an earlier version of this file did) left every existing route
+    // without `.editing`, so "Wegpunkte bearbeiten" silently did nothing on them -- no vertex
+    // handles ever appeared. velo-melder.html avoids this the same way: loadCustomRoutes()
+    // only runs inside onLibReady(), after leaflet-draw.js has already loaded.
     // ---------------------------------------------------------------------------------------
     fetch('/route-types').then(function (r) { return r.json(); }).then(function (types) {
       ROUTE_TYPES = types;
@@ -654,13 +712,18 @@
 
       buildTypePills();
       loadBackups();
+
+      loadCss(DRAW_CSS_URL);
+      return new Promise(function (resolve) {
+        var ready = 0;
+        function onLibReady() { ready++; if (ready === 2) resolve(); }
+        loadScript(DECORATOR_JS_URL, onLibReady);
+        loadScript(DRAW_JS_URL, onLibReady);
+      });
+    }).then(function () {
       return loadFromServer();
     }).then(function () {
-      loadCss(DRAW_CSS_URL);
-      var ready = 0;
-      function onLibReady() { ready++; if (ready === 2) initTools(); }
-      loadScript(DECORATOR_JS_URL, onLibReady);
-      loadScript(DRAW_JS_URL, onLibReady);
+      initTools();
     }).catch(function () {
       markClean('Fehler beim Laden der Routen.');
     });
