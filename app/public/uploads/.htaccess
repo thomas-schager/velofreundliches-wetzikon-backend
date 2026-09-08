@@ -1,0 +1,13 @@
+# This directory holds user-uploaded report photos (ReportSubmissionService). Filenames are
+# random and extensions are guessed from the real MIME type, but as defense-in-depth, scripts
+# are never allowed to execute here even if something slips past that.
+<IfModule mod_authz_core.c>
+    <FilesMatch "\.(php\d?|phtml|pl|py|cgi|sh)$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    <FilesMatch "\.(php\d?|phtml|pl|py|cgi|sh)$">
+        Deny from all
+    </FilesMatch>
+</IfModule>

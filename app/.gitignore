@@ -8,3 +8,8 @@
 /var/
 /vendor/
 ###< symfony/framework-bundle ###
+
+# User-uploaded report photos (ReportSubmissionService) -- real content, not code.
+# Keep the directory structure and its .htaccess tracked, ignore actual uploads.
+/public/uploads/*
+!/public/uploads/.htaccess
