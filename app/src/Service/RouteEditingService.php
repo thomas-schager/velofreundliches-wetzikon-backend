@@ -109,8 +109,48 @@ class RouteEditingService
      * Restoring is just another tracked save -- it goes through the exact same save() path, so
      * it also writes its own pre-restore backup first. There is no special-cased "undo" logic
      * that bypasses the normal write path.
+     *
+     * A backup's own stored file is the network's state BEFORE that backup's save was applied
+     * (save() snapshots the old state first) -- so "restore version #N", read the way an admin
+     * reads the version list (labelled by, and listing the changes belonging to, the save that
+     * PRODUCED it), has to restore the state that save resulted in, not the state before it.
+     * That's the next-newer backup's file -- or, if #N is the newest backup there is, simply the
+     * current live network. This must resolve the exact same way previewing version #N does
+     * (see getBackupFeatureCollection()'s caller in the controller) -- the two used to disagree
+     * (restore used #N's own before-file while preview showed the resulting state), which meant
+     * clicking "Vorschau" and "Wiederherstellen" on the same row showed/restored different
+     * things.
      */
     public function restoreBackup(int $backupId, AdminUser $admin): array
+    {
+        $backup = $this->routeBackups->find($backupId);
+        if ($backup === null) {
+            throw new RouteBackupNotFoundException("No route backup with id {$backupId}.");
+        }
+
+        $nextNewer = $this->routeBackups->findNextNewer($backupId);
+        $geoJson = $nextNewer !== null
+            ? $this->getBackupFeatureCollection($nextNewer->getId())
+            : $this->getCurrentFeatureCollection();
+
+        // getCreatedAt() is a UTC instant (as stored) -- the editor UI's own timestamps are all
+        // formatted client-side via Date/toLocaleString(), which renders in the admin's local
+        // (Swiss) time automatically. This is the one date the backend renders into user-facing
+        // text itself, so it has to convert explicitly or it prints the UTC hour instead.
+        $localCreatedAt = $backup->getCreatedAt()->setTimezone(new \DateTimeZone('Europe/Zurich'));
+        $label = sprintf('Wiederherstellung von Version #%d (%s)', $backupId, $localCreatedAt->format('d.m.Y, H:i'));
+
+        return $this->save($geoJson, $admin, $label);
+    }
+
+    /**
+     * Read-only lookup of a backup's stored snapshot -- what the network looked like just
+     * before that backup's associated save was applied. Backs the editor's "preview this
+     * version on the map" feature; unlike restoreBackup(), this never writes anything.
+     *
+     * @return array{type: string, features: array}
+     */
+    public function getBackupFeatureCollection(int $backupId): array
     {
         $backup = $this->routeBackups->find($backupId);
         if ($backup === null) {
@@ -127,9 +167,7 @@ class RouteEditingService
             throw new RouteBackupNotFoundException("Backup #{$backupId}'s snapshot file is unreadable.");
         }
 
-        $label = sprintf('Wiederherstellung von Version #%d (%s)', $backupId, $backup->getCreatedAt()->format('d.m.Y, H:i'));
-
-        return $this->save($geoJson, $admin, $label);
+        return $geoJson;
     }
 
     // -----------------------------------------------------------------------------------------

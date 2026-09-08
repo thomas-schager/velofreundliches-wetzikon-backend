@@ -30,6 +30,10 @@
     var typesByKey = {};
     var hiddenTypes = new Set();
     var isDirty = false;
+    // While true, the map shows a past backup's snapshot instead of the live network -- see
+    // enterPreview()/exitPreview(). Read-only: updateActionButtonsEnabled() disables every
+    // editing tool and handleRouteClick() no-ops, so nothing can be mutated while previewing.
+    var previewMode = false;
 
     // ---------------------------------------------------------------------------------------
     // Map + tile layers (design-system/map.html)
@@ -430,7 +434,7 @@
       var drawing = drawChoosing || !!currentDrawer;
       var vertexEditing = vertexEditArmed || !!vertexEditLayer;
       var deleting = deleteArmed;
-      var anyActive = drawing || vertexEditing || deleting;
+      var anyActive = previewMode || drawing || vertexEditing || deleting;
       document.getElementById('btnDrawRoute').disabled = anyActive && !drawing;
       document.getElementById('btnEditVertices').disabled = anyActive && !vertexEditing;
       document.getElementById('btnDeleteRoutes').disabled = anyActive && !deleting;
@@ -438,13 +442,14 @@
       // The changeset as a whole can only be saved or discarded once any in-progress route
       // action has itself been accepted or cancelled -- otherwise "Speichern"/"Verwerfen"
       // would act on a route that's mid-edit, which has no well-defined meaning -- and only
-      // once there's actually something to save or discard in the first place.
+      // once there's actually something to save or discard in the first place. Previewing a
+      // past version counts as "active" here too -- it's read-only, nothing to save/discard.
       var saveDisabled = anyActive || !isDirty;
       var saveBtn = document.getElementById('btnSaveRoutes');
       var discardBtn = document.getElementById('btnDiscard');
       saveBtn.disabled = saveDisabled;
       discardBtn.disabled = saveDisabled;
-      var reason = anyActive ? 'Erst die laufende Aktion abschliessen' : (!isDirty ? 'Keine Änderungen' : '');
+      var reason = previewMode ? 'Vorschau aktiv -- zuerst zur aktuellen Version zurückkehren' : (anyActive ? 'Erst die laufende Aktion abschliessen' : (!isDirty ? 'Keine Änderungen' : ''));
       saveBtn.title = reason;
       discardBtn.title = reason;
     }
@@ -838,6 +843,7 @@
       // landed on the route's own (possibly thin) rendered line in drawnItems or on its wider
       // invisible hit target in hitAreaGroup -- see rebuildDecorators().
       function handleRouteClick(layer) {
+        if (previewMode) return; // read-only: no selecting/retyping/deleting a previewed version
         if (deleteArmed) {
           toggleStagedForDeletion(layer);
           justSelected = true;
@@ -1014,6 +1020,61 @@
       return { label: label, bullets: bullets };
     }
 
+    // ---------------------------------------------------------------------------------------
+    // Version preview: shows a past backup's snapshot on the map read-only, via the same
+    // renderFeatureCollection() used for the live network -- so it looks exactly as it would
+    // have at that point in time, including hidden/legend state. Exiting just re-fetches the
+    // real current network the normal way (loadFromServer()), no special-cased restore path.
+    // ---------------------------------------------------------------------------------------
+    var previewedRowEl = null;
+
+    function setPreviewedRow(rowEl) {
+      if (previewedRowEl) previewedRowEl.classList.remove('is-previewing');
+      previewedRowEl = rowEl || null;
+      if (previewedRowEl) previewedRowEl.classList.add('is-previewing');
+    }
+
+    // A backup's stored file is the network's state BEFORE that backup's own save was applied
+    // (see RouteEditingService::save() -- it snapshots the old state first) -- but a version row
+    // in the list is labelled by, and lists the changes belonging to, the save that PRODUCED it.
+    // So "preview version N" has to fetch the NEXT-newer backup's file (whose "before" is N's
+    // "after") -- see renderBackups() below, which resolves `sourceUrl` per row accordingly. The
+    // newest row has no newer backup to source from, but it also needs none: its "after" state
+    // is simply the live network, i.e. what's already showing outside of preview mode -- so it
+    // gets no "Vorschau" button at all, and previewing anything else is guaranteed to be a
+    // genuinely different, past state (satisfying "never show the banner for the current state").
+    function enterPreview(sourceUrl, dateLabel, rowEl) {
+      if (isDirty && !confirm('Ungespeicherte Änderungen gehen beim Wechsel zur Vorschau verloren. Fortfahren?')) return;
+      stopAll();
+      fetch(sourceUrl)
+        .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+        .then(function (result) {
+          if (!result.ok) { alert('Fehler: ' + (result.data.message || result.data.error || 'unbekannt')); return; }
+          previewMode = true;
+          renderFeatureCollection(result.data);
+          markClean('Alte Version -- nicht der aktuelle Stand.');
+          setPreviewedRow(rowEl);
+          document.getElementById('previewBannerText').textContent = 'Alte Version vom ' + dateLabel;
+          document.getElementById('previewBanner').hidden = false;
+          updateActionButtonsEnabled();
+        })
+        .catch(function () { alert('Verbindung zum Server fehlgeschlagen.'); });
+    }
+
+    function exitPreview() {
+      previewMode = false;
+      // loadFromServer() only refetches the map data, not the backups list -- the row DOM is
+      // unchanged, so the current (newest, first) row is still right here to re-highlight.
+      setPreviewedRow(document.querySelector('.adm-backup-row'));
+      document.getElementById('previewBanner').hidden = true;
+      loadFromServer().then(function () {
+        updateActionButtonsEnabled();
+        showToast('Zur aktuellen Version zurückgekehrt.');
+      });
+    }
+
+    document.getElementById('btnExitPreview').addEventListener('click', exitPreview);
+
     function renderBackups(items) {
       var list = document.getElementById('backupsList');
       list.innerHTML = '';
@@ -1021,8 +1082,9 @@
         list.innerHTML = '<p style="color:var(--color-muted);font-size:12px;">Noch keine Versionen -- die erste wird beim nächsten Speichern angelegt.</p>';
         return;
       }
-      items.forEach(function (b) {
+      items.forEach(function (b, i) {
         var date = new Date(b.createdAt);
+        var isCurrent = i === 0; // items is newest-first (see RouteBackupRepository::findAllOrdered)
         var parsed = parseBackupSummary(b.summary);
 
         var row = document.createElement('div');
@@ -1064,29 +1126,62 @@
         });
         details.appendChild(changelist);
 
-        var btn = document.createElement('button');
-        btn.className = 'adm-btn adm-btn--secondary adm-btn--sm adm-btn--block';
-        btn.textContent = 'Wiederherstellen';
-        btn.addEventListener('click', function () {
-          if (!confirm('Stand vom ' + date.toLocaleString('de-CH') + ' wiederherstellen? Der aktuelle Stand wird dabei automatisch als neue Version abgelegt.')) return;
-          fetch('/admin/routes/backups/' + b.id + '/restore', { method: 'POST' })
-            .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
-            .then(function (result) {
-              if (!result.ok) { alert('Fehler: ' + (result.data.message || result.data.error || 'unbekannt')); return; }
-              stopAll();
-              renderFeatureCollection(result.data);
-              markClean();
-              loadBackups();
-              showToast('Version wiederhergestellt.');
-            })
-            .catch(function () { alert('Verbindung zum Server fehlgeschlagen.'); });
-        });
-        details.appendChild(btn);
+        var rowActions = document.createElement('div');
+        rowActions.className = 'adm-backup-row__actions';
+
+        // The newest row IS the live network -- there's nothing distinct to preview, so it gets
+        // no "Vorschau" button (see the note on enterPreview()/renderBackups() sourcing above).
+        if (!isCurrent) {
+          var previewBtn = document.createElement('button');
+          previewBtn.type = 'button';
+          previewBtn.className = 'adm-btn adm-btn--secondary adm-btn--sm';
+          previewBtn.innerHTML = '<i data-lucide="eye" width="14" height="14"></i> Vorschau';
+          var sourceUrl = '/admin/routes/backups/' + items[i - 1].id;
+          previewBtn.addEventListener('click', function () {
+            enterPreview(sourceUrl, date.toLocaleString('de-CH'), row);
+          });
+          rowActions.appendChild(previewBtn);
+        }
+
+        // Restoring the current version (to itself) is meaningless -- same reasoning as omitting
+        // "Vorschau" above, so this row gets no action buttons at all.
+        if (!isCurrent) {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'adm-btn adm-btn--secondary adm-btn--sm';
+          btn.textContent = 'Wiederherstellen';
+          btn.addEventListener('click', function () {
+            if (!confirm('Stand vom ' + date.toLocaleString('de-CH') + ' wiederherstellen? Der aktuelle Stand wird dabei automatisch als neue Version abgelegt.')) return;
+            fetch('/admin/routes/backups/' + b.id + '/restore', { method: 'POST' })
+              .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+              .then(function (result) {
+                if (!result.ok) { alert('Fehler: ' + (result.data.message || result.data.error || 'unbekannt')); return; }
+                previewMode = false;
+                setPreviewedRow(null);
+                document.getElementById('previewBanner').hidden = true;
+                stopAll();
+                renderFeatureCollection(result.data);
+                markClean();
+                loadBackups();
+                showToast('Version wiederhergestellt.');
+              })
+              .catch(function () { alert('Verbindung zum Server fehlgeschlagen.'); });
+          });
+          rowActions.appendChild(btn);
+        }
+
+        details.appendChild(rowActions);
 
         row.appendChild(trigger);
         row.appendChild(details);
         list.appendChild(row);
       });
+      // renderBackups() only ever runs while showing the live network (boot, after a save,
+      // after a restore -- never while previewMode is true, see enterPreview()'s isDirty-style
+      // guard and updateActionButtonsEnabled() disabling Speichern during preview), so the
+      // newest row is always "currently displayed" here and gets the same highlight preview
+      // rows get -- exactly one row is highlighted at any given time, never zero.
+      setPreviewedRow(list.querySelector('.adm-backup-row'));
       if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 

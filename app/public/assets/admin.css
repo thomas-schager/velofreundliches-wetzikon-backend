@@ -464,6 +464,24 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
   max-height: calc(100% - 24px); overflow-y: auto;
 }
 .adm-route-legend.visible { display: flex; }
+
+/* Shown over the map while a past version's snapshot (not the live/current network) is being
+   displayed -- read-only, see enterPreview()/exitPreview() in routes-editor.js. Amber tint reused
+   from .adm-internal-note, this project's established "non-default state, pay attention" color. */
+.adm-preview-banner {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 1001;
+  display: flex; align-items: center; gap: 10px; max-width: calc(100% - 32px);
+  background: #fff9e8; border: 1px solid #f0dfa0; color: #6b5300;
+  padding: 7px 8px 7px 12px; border-radius: var(--radius-sm); box-shadow: var(--shadow-md);
+  font: 500 12px var(--font-body); white-space: nowrap;
+}
+.adm-preview-banner svg { flex-shrink: 0; }
+.adm-preview-banner span { overflow: hidden; text-overflow: ellipsis; }
+/* Without this, the [hidden] attribute has no effect: .adm-preview-banner's own `display: flex`
+   and the UA stylesheet's `[hidden] { display: none }` have equal specificity, and this rule
+   would lose that tie since it's declared first -- so the banner rendered visible regardless of
+   the `hidden` property JS toggles on it. */
+.adm-preview-banner[hidden] { display: none; }
 .adm-route-legend__title { font: 700 11px var(--font-body); text-transform: uppercase; letter-spacing: 0.07em; color: var(--color-muted); margin-bottom: 7px; }
 .adm-route-legend-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; user-select: none; }
 .adm-route-legend-row + .adm-route-legend-row { border-top: 1px solid var(--color-border); margin-top: 3px; padding-top: 5px; }
@@ -601,11 +619,14 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
 .adm-backup-count--modified { background: #fff4e5; color: #8a5a00; }
 .adm-backup-row__chevron { flex-shrink: 0; margin-top: 3px; color: var(--color-muted); transition: transform var(--dur) var(--ease); }
 .adm-backup-row.is-expanded .adm-backup-row__chevron { transform: rotate(180deg); }
+.adm-backup-row.is-previewing { background: #fff9e8; }
 
 .adm-backup-row__details { display: none; padding: 0 10px 12px; }
 .adm-backup-row.is-expanded .adm-backup-row__details { display: block; }
 .adm-backup-row__details .adm-changelist { margin-bottom: 10px; }
 .adm-backup-row__details .adm-changelist li { font-size: 12px; padding: 6px 8px; }
+.adm-backup-row__details .adm-backup-row__actions { display: flex; gap: 6px; }
+.adm-backup-row__details .adm-backup-row__actions .adm-btn { flex: 1 1 0; }
 
 .adm-toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); z-index: 3000;

@@ -19,6 +19,8 @@ use Symfony\Component\Security\Http\Attribute\CurrentUser;
  *   2. POST /admin/routes/diff     -- preview what a proposed edit would change, nothing written
  *   3. PUT /admin/routes           -- actually save (writes a pre-change backup first)
  * Backups are listable/restorable via GET/POST .../backups -- see RouteEditingService.
+ * GET .../backups/{id} returns a single backup's snapshot read-only, for previewing an old
+ * version on the map without restoring it.
  */
 class AdminRoutesController extends AbstractApiController
 {
@@ -85,6 +87,18 @@ class AdminRoutesController extends AbstractApiController
         ], $this->routes->listBackups());
 
         return new JsonResponse($items);
+    }
+
+    #[Route('/admin/routes/backups/{id}', name: 'admin_api_route_backups_get', methods: ['GET'], requirements: ['id' => '\d+'])]
+    public function backupGeoJson(int $id): JsonResponse
+    {
+        try {
+            $geoJson = $this->routes->getBackupFeatureCollection($id);
+        } catch (RouteBackupNotFoundException $e) {
+            return $this->errorResponse('not_found', $e->getMessage(), 404);
+        }
+
+        return new JsonResponse($geoJson);
     }
 
     #[Route('/admin/routes/backups/{id}/restore', name: 'admin_api_route_backups_restore', methods: ['POST'], requirements: ['id' => '\d+'])]
