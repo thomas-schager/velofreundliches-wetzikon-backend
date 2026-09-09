@@ -13,3 +13,9 @@
 # Keep the directory structure and its .htaccess tracked, ignore actual uploads.
 /public/uploads/*
 !/public/uploads/.htaccess
+
+# Deploy config holds SSH host/user/path -- keep the example committed, not the real one.
+/deploy/deploy.env
+
+# Generated .env.local content for testing/production -- real DB/SMTP credentials, never committed.
+/deploy/env-local/

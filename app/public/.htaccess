@@ -1,4 +1,26 @@
+Use php-fpm php85
+
+#@__HCP_END__@#
+# Anything after the comment above is left alone
+
+# The block above is Hostpoint-managed: their panel writes it when you set a domain's PHP
+# version, and (per the comment it generates) only ever touches this file up to that marker
+# line -- everything below is genuinely ours. Every deploy still overwrites the live file with
+# this one, so if the PHP version is ever changed again via Hostpoint's panel, update this line
+# to match, or the next deploy will silently revert it.
+#
+# Pinned to php85 rather than "latest" -- same reasoning as REMOTE_PHP_BIN in deploy.env.example
+# (a versioned path/name instead of a floating alias). Both are driven by the same PHP_VERSION
+# setting there; keep this line in sync with it if that ever changes. Confirmed against
+# https://support.hostpoint.ch/de/produkte/webhosting/haeufig-gestellte-fragen/umstellung-auf-php-fpm.
+# Identical for both testing and production -- this line doesn't reference the domain.
+
 DirectoryIndex index.php
+ErrorDocument 503 /maintenance-status
+
+<IfModule mod_mime.c>
+    AddType application/json .json
+</IfModule>
 
 <IfModule mod_negotiation.c>
     Options -MultiViews
@@ -6,6 +28,35 @@ DirectoryIndex index.php
 
 <IfModule mod_rewrite.c>
     RewriteEngine On
+
+    # Maintenance mode: deploy.sh renames maintenance.html.off -> maintenance.html to activate,
+    # and back to deactivate -- the file's presence under the active name is the whole switch,
+    # see DEPLOY.md. Every request gets a real 503 while it's active: the small, stable set of
+    # server-rendered admin-UI pages gets maintenance.html, everything else (the JSON API) gets
+    # maintenance.json, so fetch()-based clients see a real error status instead of mistaking
+    # the maintenance body for actual data.
+    #
+    # A plain internal rewrite can't set a non-2xx status on its own, so this goes through
+    # Apache's ErrorDocument machinery instead: mark which body the request wants via an env
+    # var, trigger a 503, and let the /maintenance-status sub-request ErrorDocument points at
+    # pick the body based on that env var (Apache re-exposes it prefixed REDIRECT_ on error
+    # sub-requests). ErrorDocument keeps the original 503 status while swapping in that body.
+    RewriteCond %{DOCUMENT_ROOT}/maintenance.html -f
+    RewriteCond %{REQUEST_URI} !^/maintenance(-status|\.html|\.json)$
+    RewriteCond %{REQUEST_URI} ^/(login|verify|forgot-password|reset-password|dashboard|meldungen|routen)(/.*)?$ [OR]
+    RewriteCond %{REQUEST_URI} =/
+    RewriteRule ^ - [E=MAINTENANCE_KIND:html,R=503,L]
+
+    RewriteCond %{DOCUMENT_ROOT}/maintenance.html -f
+    RewriteCond %{REQUEST_URI} !^/maintenance(-status|\.html|\.json)$
+    RewriteRule ^ - [E=MAINTENANCE_KIND:json,R=503,L]
+
+    RewriteCond %{REQUEST_URI} =/maintenance-status
+    RewriteCond %{ENV:REDIRECT_MAINTENANCE_KIND} =json
+    RewriteRule ^ /maintenance.json [L]
+
+    RewriteCond %{REQUEST_URI} =/maintenance-status
+    RewriteRule ^ /maintenance.html [L]
 
     RewriteCond %{REQUEST_URI}::$0 ^(/.+)/(.*)::\2$
     RewriteRule .* - [E=BASE:%1]

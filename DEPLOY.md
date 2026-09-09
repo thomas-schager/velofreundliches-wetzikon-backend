@@ -1,278 +1,297 @@
 # Deployment Guide — VeloWetzikon Backend
 
-This document describes every step needed to move the local `app/` Symfony application to the
-production web host. Keep it up to date whenever the local setup changes.
+How the local `app/` Symfony application gets deployed to Hostpoint, over SSH. Three
+environments exist: **dev** (local, unstable by definition), **testing**, and **production** —
+testing and production both live on Hostpoint under the same SSH account, in fixed, separate
+directories.
 
-> **Assumed hosting scenario:** Shared web hosting without SSH/console access, deployed via FTP.
-> Every step that would normally be a CLI command has a no-SSH alternative listed. If SSH becomes
-> available later, use the CLI directly instead — it's simpler and safer.
+**This file deliberately uses placeholders (`<ssh_user>`, `<test_base_path>`, etc.) instead of
+real account details.** The real SSH host/user, absolute server paths, and database names live
+in `internals.md` (gitignored, never committed) and `app/deploy/deploy.env` (also gitignored) —
+this file is git-tracked, so it stays generic on purpose. Don't paste real values back into it.
 
-This app is deployed separately from `VeloWetzikon_Contao` — typically to its own subdomain (e.g.
-`admin.yourdomain.ch`) with its own document root and its own database. See that project's own
-`DEPLOY.md` for the public site; this doc only covers `app/`.
+This app is deployed separately from `VeloWetzikon_Contao`, which has its own `DEPLOY.md`.
 
 ---
 
-## Prerequisites
+## Overview
+
+**No symlinks, no release history.** Each environment is one fixed, real directory
+(`.../app/`), with `app/public` configured directly as the document root in Hostpoint's panel.
+Deploys `rsync` straight into that directory, in place.
+
+**The workflow, matching `internals.md`'s stated principle:**
+1. `deploy.sh test` — refreshes testing's database and uploads from production first, *then*
+   deploys the current local code and runs migrations against testing.
+2. You validate by hand on `https://test-backend.velofreundliches-wetzikon.ch`.
+3. Found a problem? Fix it locally, run `deploy.sh test` again — it always starts by
+   re-refreshing from production, so every attempt begins from the same real baseline.
+4. Looks good? `promote.sh` copies testing's exact, already-validated files into production —
+   not a second local build, so production gets exactly what was tested.
+
+**Safety nets, applied identically on both environments, every time:**
+- Every script aborts immediately if `REMOTE_BASE_PATH_TEST` and `REMOTE_BASE_PATH_PRODUCTION`
+  in `deploy.env` are ever identical (`check_base_paths_distinct`) — otherwise a copy-paste
+  mistake there would make every "safe" testing operation silently act on production instead.
+- Before touching any database, the script verifies the `DATABASE_URL` actually found in that
+  environment's live `.env.local` names the exact database `deploy.env` expects for it
+  (`DB_NAME_TEST` / `DB_NAME_PRODUCTION`, via `check_db_name`) — refuses to proceed otherwise.
+  This is what actually guarantees only the two databases configured in `deploy.env`
+  (`DB_NAME_TEST`/`DB_NAME_PRODUCTION`) are ever touched; without it, "which database" would be
+  entirely implicit in whatever `.env.local` happens to contain, with nothing catching a
+  miscopied or hand-edited file. See §9.5.
+- A `mysqldump` backup is taken immediately before every migration run.
+- Pending migrations are dry-run first; if the SQL contains `DROP COLUMN`, `DROP TABLE`, or
+  `TRUNCATE`, you must type `DESTROY` to proceed. This is a heuristic, not a guarantee — it
+  won't catch e.g. a column type narrowed in a way that truncates values.
+- Maintenance mode wraps the risky window (from just after the code lands through the end of
+  migrations) on whichever environment is being touched. It clears automatically on success; on
+  failure it's left **on**, with the exact command to lift it printed to the terminal — nobody
+  ever sees a broken, half-deployed app.
+- Anything that touches **production** — `deploy.sh production`, `promote.sh` — requires typing
+  the word `production` to proceed. Testing runs unattended except for the destructive-migration
+  check, which applies regardless of environment.
+
+**Rollback is git, not a script.** There's no release history to flip back to. If a promoted
+release breaks production: fix it locally (or `git checkout` an older commit) and redeploy the
+same way. Database-side, restore from the pre-migration backup if needed (see §6).
+
+---
+
+## 1. Prerequisites
 
 ### Local machine
-- PHP >= 8.4 (matches `composer.json`'s `require.php`)
-- Composer >= 2
-- Git
-- FTP client (e.g. Cyberduck, FileZilla)
+- PHP, Composer, `rsync`, `ssh` (standard on macOS)
+- SSH key-based access to Hostpoint already working non-interactively
 
-### Web host requirements
-- **PHP >= 8.4** with extensions: `pdo_mysql`, `ctype`, `iconv`, `intl`, `mbstring`, `opcache` —
-  check via the host's PHP version selector (cPanel "MultiPHP"/"PHP Selector" or similar); shared
-  hosts often default to an older PHP, which this app will not run on
-- **MariaDB** (matches local dev, see `DATABASE.md`) + phpMyAdmin or equivalent
-- Apache with `mod_rewrite` (the app relies on `public/.htaccess`, see §3.4)
-- A dedicated web root that can be pointed to the `app/public/` sub-folder
-- HTTPS active — the app sets an authentication session cookie (`symfony/security-bundle`)
-
----
-
-## 1. Local Development Setup
-
-See `README.md` and `DATABASE.md` for first-time local setup (Docker/Colima MariaDB, seeding an
-admin user, running via `php -S localhost:8001 -t public router.php`). This section only covers
-what's different for a production build.
+### Hostpoint
+- PHP **8.5** (`php85`) — the only version ≥ 8.4 available on this account (8.4 itself isn't
+  offered; the plain `php` on the SSH shell resolves to 8.3, too old for this app). Pinned
+  explicitly via `Use php-fpm php85` at the top of `public/.htaccess` (Hostpoint's own
+  documented syntax, not the floating `latest`/`head` aliases) — confirmed live via a
+  throwaway `phpversion()` check on both domains.
+- `rsync` and `mysqldump`/`mysql` reachable over SSH (assumed present — standard on Hostpoint,
+  not exhaustively verified)
+- MariaDB 10.11.19, confirmed via phpMyAdmin (`SELECT VERSION()`), port 3306
 
 ---
 
-## 2. Git Workflow
+## 2. One-time local setup
 
-### What is committed
-| Path | Committed | Reason |
-|---|---|---|
-| `composer.json` / `composer.lock` / `symfony.lock` | Yes | Dependency definitions |
-| `config/` | Yes | Symfony config |
-| `src/` | Yes | App code |
-| `migrations/` | Yes | Doctrine schema history |
-| `templates/` | Yes | Twig templates |
-| `public/` (except `uploads/*`) | Yes | Front controller, static assets, `.htaccess` |
-| `public/uploads/.htaccess` | Yes | Hardening rule, see §8.2 — tracked even though the rest of `uploads/` isn't |
-| `.env` | Yes | Default env vars (no secrets) |
-| `deploy/console-runner.php.template` | Yes | Template only — never upload it unmodified, see §7 |
-| `vendor/` | **No** | Re-installed via Composer locally, then uploaded |
-| `var/` | **No** | Cache, logs, and `var/route-backups/` — see §8.1 for why that last one matters |
-| `public/uploads/*` (actual files) | **No** | User-uploaded report photos, managed separately |
-| `.env.local` | **No** | Contains secrets |
+```bash
+cd app/deploy
+cp deploy.env.example deploy.env   # already done in this repo -- deploy.env has the real values
+```
+
+`deploy.env` holds `SSH_HOST`/`SSH_USER`/`SSH_PORT`, `REMOTE_BASE_PATH_TEST`,
+`REMOTE_BASE_PATH_PRODUCTION`, and `PHP_VERSION` (which `REMOTE_PHP_BIN` is derived from). It's
+gitignored — never commit it. `PHP_VERSION` **must** match the `Use php-fpm <version>` line in
+`public/.htaccess`; every script checks this before doing anything else and refuses to proceed
+if they've drifted apart (that file is static, so keeping the two in sync is manual).
 
 ---
 
-## 3. Deploying to the Web Host (Shared Hosting / No SSH)
+## 3. One-time server setup
 
-### 3.1 Prepare locally before uploading
-
-Run these once on your local machine before each upload:
+Neither environment creates its own `.env.local` automatically — it holds secrets, so it's
+created once by hand. Content already generated at `app/deploy/env-local/{testing,production}.env.local`
+(gitignored) from `internals.md`'s credentials; upload each as `.env.local`:
 
 ```bash
 cd app
-composer install --no-dev --optimize-autoloader
-php bin/console cache:clear --env=prod --no-debug
+scp deploy/env-local/testing.env.local <ssh_user>@<ssh_host>:<test_base_path>/app/.env.local
+scp deploy/env-local/production.env.local <ssh_user>@<ssh_host>:<production_base_path>/app/.env.local
 ```
+(real values in `internals.md` / `deploy.env`)
 
-This generates an optimised `vendor/` folder that you upload to the server. You do **not** need
-Composer on the server. Don't run this against your day-to-day working copy without re-running
-`composer install` (no flags) afterwards — `--no-dev` removes `symfony/maker-bundle`, which local
-development wants back.
+Both databases start empty — the first `deploy.sh`/`promote.sh` run against each builds the
+whole schema from scratch via migrations, no manual import needed.
 
-### 3.2 What to upload
-
-Upload the following via FTP/SFTP to the server, into the app's own directory (project root, not
-inside `public/`):
-
-| What | Notes |
-|---|---|
-| `vendor/` | Built locally in §3.1 |
-| `composer.json` + `composer.lock` + `symfony.lock` | For reference |
-| `bin/` | Symfony console — not runnable directly without SSH, but §7 boots the kernel around it |
-| `config/` | Symfony config |
-| `src/` | App code |
-| `migrations/` | Doctrine migration classes |
-| `templates/` | Twig templates |
-| `public/` | Web root — **including** `.htaccess` and `uploads/.htaccess`, **excluding** the contents of `uploads/` (see §4) |
-| `.env` | Base env file |
-
-**Do not upload:** `var/`, `router.php` (dev-server only), `deploy/console-runner.php.template`
-in its unmodified form (see §7).
-
-### 3.3 Configure the environment on the server
-
-Create `.env.local` directly on the server (via FTP or the host's file manager):
-
-```
-APP_ENV=prod
-APP_SECRET=<generate with: openssl rand -hex 32>
-DATABASE_URL="mysql://dbuser:dbpassword@localhost:3306/dbname?serverVersion=mariadb-X.X.X&charset=utf8mb4"
-MAILER_DSN=smtp://user:pass@smtp.host:587
-DEFAULT_URI=https://admin.yourdomain.ch
-APP_TEST_BYPASS_TOKEN=
-```
-
-`APP_SECRET` must be a new random string, different from local. `APP_TEST_BYPASS_TOKEN` must stay
-**empty** in production — a non-empty value lets requests carrying a matching
-`X-Test-Bypass-Token` header skip real email-based 2FA (see `AuthService::isTestBypass()`); it
-exists only for local automated tests.
-
-### 3.4 Configure the web root and rewriting
-
-Point the host's document root to the app's **`public/`** subfolder (typically via a subdomain).
-
-`public/.htaccess` is already committed to this repo (added alongside this guide) and routes all
-requests through `public/index.php`, matching Symfony's standard Apache config. If your upload
-tool skips dotfiles by default, double-check it actually transferred — a missing `.htaccess` means
-every route except `/` returns a directory listing or 404.
-
-### 3.5 First-time database setup
-
-No CLI on the server, so import the schema directly instead of running migrations:
-
-1. Create the database + a dedicated DB user in the host's control panel
-2. Open phpMyAdmin → **Import** → upload `database/schema.sql`
-3. Mark the existing migrations as already applied (the schema import already did their work, so
-   don't re-run them) — in phpMyAdmin's SQL tab:
-
-   ```sql
-   INSERT INTO doctrine_migration_versions (version, executed_at, execution_time) VALUES
-   ('DoctrineMigrations\\Version20260903185437', NOW(), 0),
-   ('DoctrineMigrations\\Version20260904075016', NOW(), 0);
-   ```
-
-   Check `migrations/` for any files newer than these two before you run this — add a row per
-   migration class that actually exists at deploy time.
-4. Create the first admin user — see §7.
-
-### 3.6 Future schema changes (after go-live)
-
-1. Re-upload the new file(s) in `migrations/`
-2. Run `doctrine:migrations:migrate` once via the console runner (§7), then delete the runner
-3. Confirm via phpMyAdmin that `doctrine_migration_versions` gained the new row(s)
+The document root (`app/public`) and PHP version (`php85`) are already configured per-domain in
+Hostpoint's panel for both `test-backend.velofreundliches-wetzikon.ch` and
+`backend.velofreundliches-wetzikon.ch` — done as part of resolving the PHP version question
+above.
 
 ---
 
-## 4. File Uploads / User Content
+## 4. Deploying to testing
 
-`public/uploads/` holds report photos written by `ReportSubmissionService` — not in Git (see §2).
+```bash
+cd app
+./deploy/deploy.sh test
+```
 
-**Initial upload:** nothing to do — it starts empty on a fresh launch. Just make sure
-`public/uploads/` itself (and its `reports/` subfolder, created automatically on first submission)
-is writable by the PHP process; check via the FTP client's permissions dialog (`755`/`775`).
+In order: check `PHP_VERSION` against `.htaccess` → check the two base paths aren't identical →
+(production only) type `production` to confirm → check `.env.local` exists at the target
+(aborts with a pointer back to §3 if not) → check its database name matches what's expected →
+refresh testing's DB/uploads from production (`refresh-test-from-prod.sh`, test only) →
+`composer install --no-dev` locally → `rsync` the code into testing's `app/` → enter maintenance
+mode → warm cache → back up testing's DB → dry-run + check pending migrations → run migrations
+→ maintenance mode off.
 
-**On every later code deploy:** never overwrite this folder — it holds real submitted content by
-then.
+No confirmation prompt for testing itself (it's meant to be overwritten every time), unless a
+pending migration looks destructive, in which case it stops and asks for `DESTROY` regardless of
+environment.
+
+The code `rsync` excludes `.git`, `.env.local`, `var/`, `public/uploads/`, `compose.yaml`,
+`compose.override.yaml`, and — deliberately — **`deploy/` itself**, so `deploy.env` (SSH
+host/user/paths) and the generated `.env.local` files never leave your machine as part of a
+code deploy. (They'd be harmless even if uploaded, since `deploy/` sits outside the `app/public`
+document root and so is never web-accessible either way — excluded anyway, on principle.)
 
 ---
 
-## 5. Cron Jobs
+## 5. Promoting to production
 
-None required currently — the app has no scheduled/background commands (`app:create-admin-user`
-is the only custom console command, run manually).
+```bash
+cd app
+./deploy/promote.sh
+```
+
+Checks `PHP_VERSION`, checks the two base paths aren't identical, requires testing to have been
+deployed at least once, verifies *both* testing's and production's `.env.local` name their
+expected database, then asks you to type `production` to continue. Then: server-side `rsync` of
+testing's `app/` straight into production's `app/` (excluding `.env.local`, `var/`,
+`public/uploads/` — no rebuild, no re-upload from your machine) → maintenance mode → warm cache
+→ back up production's DB → dry-run + destructive migration check → run migrations →
+maintenance mode off.
 
 ---
 
-## 6. PHP Configuration
+## 6. Manually refreshing testing (without deploying code)
 
-Doctrine ORM/Migrations and the mailer need reasonable defaults; most shared hosts are fine
-out of the box. If report-photo uploads fail, raise limits via `.user.ini` in `public/`:
+```bash
+cd app
+./deploy/refresh-test-from-prod.sh
+```
 
-```ini
-upload_max_filesize = 10M
-post_max_size       = 12M
-memory_limit        = 256M
+Same thing `deploy.sh test` does as its first step, callable on its own if you just want
+testing's data reset without touching its code. Checks the two base paths aren't identical,
+that both environments' `.env.local` exist and name their expected database, then: `mysqldump`
+piped directly into testing's database (both databases live on the same MariaDB host per
+`internals.md`, so nothing passes through your machine), plus `rsync` of `public/uploads/` and
+`var/route-backups/` between the two `app/` directories. No confirmation prompt — this only
+ever writes to testing's side.
+
+---
+
+## 7. Database migrations
+
+Doctrine migration classes are plain PHP with literal SQL in `up()`/`down()` — nothing about
+them inherently prevents data loss. Concretely, for this app: `reports`, `report_photos`,
+`route_features`, `route_backups`, and `admin_users` hold real data; `ratings`/`route_types` are
+small pre-seeded reference tables, lower stakes.
+
+Two layers of protection, both automatic, on every deploy/promote:
+1. **Backup first.** `mysqldump --single-transaction --no-tablespaces`, gzipped, into
+   `<base_path>/db-backups/`. Not pruned automatically — clean old ones out by hand occasionally.
+2. **Destructive-pattern guard.** `doctrine:migrations:migrate --dry-run` runs first; if the SQL
+   it would execute contains `DROP COLUMN`, `DROP TABLE`, or `TRUNCATE`, you must type `DESTROY`
+   before the real migration runs. Doesn't catch everything (e.g. a lossy type narrowing) — real
+   protection still comes from testing running against an actual copy of production data before
+   anything reaches production.
+
+To check what's actually applied on either environment at any time:
+```bash
+ssh <ssh_user>@<ssh_host> "cd <base_path>/app && /usr/local/php85/bin/php bin/console doctrine:migrations:status"
 ```
 
 ---
 
-## 7. Running console commands without SSH
+## 8. Recovering from a failed deploy
 
-There's no browser-based admin tool for this app (unlike Contao Manager for the other project).
-`deploy/console-runner.php.template` is a minimal, token-protected script that boots the Symfony
-kernel and runs one console command per request.
+If `deploy.sh`/`promote.sh` fails partway through *after* maintenance mode was entered, it's
+left **on** deliberately — the script prints the exact command to lift it once you've dealt with
+the underlying problem:
+```bash
+ssh -p 22 <ssh_user>@<ssh_host> "mv <base_path>/app/public/maintenance.html <base_path>/app/public/maintenance.html.off"
+```
+Fix the actual problem first (bad migration, broken code) — lifting maintenance mode just makes
+whatever's there visible again, it doesn't fix anything.
 
-**Usage:**
-1. Copy `deploy/console-runner.php.template` to `public/_console.php`
-2. Replace `CHANGE-ME` in the copy with a long random string (`openssl rand -hex 32`)
-3. Upload just that one file to `public/` on the server
-4. Call it with the command and its arguments as query parameters, e.g. to create the first admin
-   user:
-   ```
-   https://admin.yourdomain.ch/_console.php?token=<your-token>&command=app:create-admin-user&email=you@example.com&password=<strong-password>&displayName=Admin
-   ```
-   or to run pending migrations:
-   ```
-   https://admin.yourdomain.ch/_console.php?token=<your-token>&command=doctrine:migrations:migrate
-   ```
-5. **Delete `public/_console.php` from the server immediately after use.** It executes arbitrary
-   console commands for anyone who has the token — it must never be left live.
-
-The password appears in the URL (and likely the host's access logs) when creating the admin user
-this way — log in once afterwards and change it, or pick a strong one-time password you don't
-reuse elsewhere.
+**Database rollback:** restore the pre-migration backup from `<base_path>/db-backups/`.
+**Code rollback:** there's no release history — fix locally or `git checkout` an older commit,
+then redeploy the normal way.
 
 ---
 
-## 8. Known Issues and Gotchas
+## 9. Known issues and gotchas
 
-### 8.1 `var/route-backups/` is real data, not cache
+### 9.1 Why maintenance mode starts *after* the file copy, not before
 
-`RouteEditingService` writes pre-change GeoJSON snapshots to `var/route-backups/` (the
-"Sicherungen" panel in the routes editor reads them back). This directory lives under `var/`,
-which is otherwise disposable cache/log data — **don't blindly wipe all of `var/` on a redeploy**;
-if you need to clear cache, delete only `var/cache/`, and leave `var/route-backups/` and
-`var/log/` alone.
+Entering maintenance mode means renaming `maintenance.html.off` → `maintenance.html` on the
+server. If that happened *before* the `rsync`, the sync itself (source is always the repo's
+`.off` copy) would silently undo it via `--delete`. So the copy itself (a few seconds) isn't
+covered by maintenance mode — everything from cache-warming through migrations is.
 
-### 8.2 Uploads directory hardened against script execution
+### 9.2 `parse_url()` doesn't decode percent-encoding
 
-`public/uploads/.htaccess` blocks execution of `.php`/`.phtml`/etc. inside the uploads folder,
-even though filenames there are already randomised and extensions are guessed from the real MIME
-type rather than trusted from the client. Keep this file in place; don't delete it when managing
-uploaded content by hand.
+`remote/backup-db.sh`, `remote/refresh-db.sh`, and `remote/db-name.sh` pull values out of
+`DATABASE_URL` with PHP's `parse_url()`, which returns components exactly as written — still
+percent-encoded. Every value pulled from it is explicitly `rawurldecode()`d before use; skipping
+that step (as an earlier draft of this file did, caught before ever running against the real
+server) silently sends mysqldump/mysql the *encoded* password and fails to authenticate.
 
-### 8.3 `router.php` is dev-server only
+Decoded credentials are `eval`'d directly into the calling shell, never written to a temp file
+— a `mktemp`'d file would land in the server's default temp directory, outside both named
+environment paths (see §9.5).
 
-`router.php` exists so `php -S ... -t public router.php` can serve static assets directly. It has
-no effect on Apache and isn't needed on the server — `public/.htaccess` does the equivalent job
-there. No need to upload it, but leaving it in place is harmless.
+### 9.3 `var/route-backups/` and `public/uploads/` are real data
+
+Both are excluded from every `rsync --delete` in `deploy.sh`/`promote.sh` specifically because
+they're user/editor-generated content, not code — same reasoning as `.env.local`.
+
+### 9.4 PHP CLI vs. web version
+
+Confirmed identical here (`php85` both ways), but shared hosts commonly differ — worth
+rechecking if migrations succeed over SSH but the live site errors, or vice versa.
+
+### 9.5 Exactly what "only these two directories/databases" actually rests on
+
+Every filesystem path any script touches traces back to `REMOTE_BASE_PATH_TEST` or
+`REMOTE_BASE_PATH_PRODUCTION` from `deploy.env` — grep for `BASE_PATH` across `app/deploy/` and
+every occurrence is one of those two, or derived from one of them. Nothing is hardcoded
+elsewhere. `check_base_paths_distinct` catches the one way this could go wrong locally (the two
+configured paths being accidentally identical).
+
+Which *database* gets touched is different: it's determined by whatever `DATABASE_URL` is
+actually written in the target's `.env.local` on the server, not by anything in `deploy.env`.
+`check_db_name` closes that gap by verifying, before every operation, that the database named
+in `DATABASE_URL` matches `DB_NAME_TEST`/`DB_NAME_PRODUCTION` — so a hand-edited or miscopied
+`.env.local` on the server gets refused rather than silently used.
+
+What this doesn't (and can't) cover: `mysqldump`/`mysql`/`ssh` themselves may use the server's
+own temp space internally (e.g. for large result sets) the way any program does — that's below
+what a deploy script can constrain, and unrelated to which environment/database was requested.
+Our own scripts, as of this design, create no files and query no database outside the two
+named paths.
 
 ---
 
-## 9. Checklist Before Going Live
+## 10. Checklist
 
-**Code & files**
-- [ ] `composer install --no-dev --optimize-autoloader` run locally (§3.1)
-- [ ] All code + `vendor/` uploaded to server
-- [ ] `public/.htaccess` and `public/uploads/.htaccess` present on the server
-- [ ] `public/uploads/` writable by the PHP process
+**One-time**
+- [ ] `deploy.env` filled in, including `DB_NAME_TEST`/`DB_NAME_PRODUCTION` (done — real values
+      from `internals.md`)
+- [ ] `.env.local` uploaded to both environments (§3)
+- [ ] PHP version pinned to `php85` in Hostpoint's panel for both domains, confirmed live (done)
+- [ ] `Use php-fpm php85` present in `public/.htaccess`, matching `PHP_VERSION` in `deploy.env`
 
-**Environment**
-- [ ] `.env.local` created on server with `APP_ENV=prod`, fresh `APP_SECRET`, correct
-      `DATABASE_URL`, real `MAILER_DSN`, empty `APP_TEST_BYPASS_TOKEN`
-- [ ] Web root points to `public/` subfolder only
-- [ ] SSL certificate active (`https://`)
-- [ ] PHP >= 8.4 selected in the host's control panel
-
-**Database**
-- [ ] `database/schema.sql` imported via phpMyAdmin
-- [ ] `doctrine_migration_versions` seeded with the current migration versions (§3.5)
-- [ ] First admin user created via the console runner (§7), then the runner deleted from the server
-
-**Verification**
-- [ ] `https://admin.yourdomain.ch/route-types` → 200 JSON (public API reachable)
-- [ ] `https://admin.yourdomain.ch/login` loads; login + email 2FA round-trip works
-- [ ] Test report photo upload lands in `public/uploads/reports/`
-- [ ] `public/_console.php` is **not** present on the server
+**Every release**
+- [ ] `./deploy/deploy.sh test`, validated by hand
+- [ ] `./deploy/promote.sh`
+- [ ] `doctrine:migrations:status` on production shows nothing pending
+- [ ] Spot-check `https://backend.velofreundliches-wetzikon.ch`
 
 ---
 
-## 10. Environment Variables Reference
+## 11. Environment variables reference
 
 | Variable | Description |
 |---|---|
-| `DATABASE_URL` | `mysql://user:password@host:3306/dbname?serverVersion=mariadb-X.X&charset=utf8mb4` |
-| `APP_SECRET` | Random secret — generate with `openssl rand -hex 32` |
-| `APP_ENV` | `dev` locally, `prod` on the server |
-| `MAILER_DSN` | e.g. `smtp://user:pass@smtp.host:587` |
-| `DEFAULT_URI` | Base URL used for links generated outside an HTTP request (e.g. email templates) |
-| `APP_TEST_BYPASS_TOKEN` | Must be empty in production — see §3.3 |
+| `DATABASE_URL` | `mysql://user:password@host:3306/dbname?serverVersion=mariadb-10.11.19&charset=utf8mb4` — password percent-encoded |
+| `APP_SECRET` | Random, distinct per environment — `openssl rand -hex 32` |
+| `APP_ENV` | `prod` on both testing and production — not `test`, a distinct Symfony concept (PHPUnit runs) unrelated to "the testing server" |
+| `MAILER_DSN` | Same real Hostpoint SMTP account on dev, testing, and production alike, per `internals.md` |
+| `DEFAULT_URI` | Each environment's own domain |
+| `APP_TEST_BYPASS_TOKEN` | Must be empty on both — a non-empty value would let a header skip real email-based 2FA |
