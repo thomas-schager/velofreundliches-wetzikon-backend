@@ -13,8 +13,8 @@ use Symfony\Component\Security\Http\Attribute\CurrentUser;
 
 /**
  * Admin, session-authenticated route editing -- see api/openapi.yaml "Admin — Routes". Backs the
- * (not yet built, see README.md) route editor UI. Three-step flow, matching the "no auto-save,
- * show changes before saving" requirement:
+ * /routen route editor UI (Admin\RoutesController + public/assets/routes-editor.js). Three-step
+ * flow, matching the "no auto-save, show changes before saving" requirement:
  *   1. GET /admin/routes           -- load the current network (features carry their db id)
  *   2. POST /admin/routes/diff     -- preview what a proposed edit would change, nothing written
  *   3. PUT /admin/routes           -- actually save (writes a pre-change backup first)

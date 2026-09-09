@@ -34,7 +34,8 @@ from and are not overwritten by it.
 │   └── schema.sql      # MariaDB schema, derived from openapi.yaml — see DATABASE.md
 ├── docs/
 │   └── api-implementation-strategy.md   # architecture decisions: one app vs. two, DB consistency
-└── DATABASE.md         # local MariaDB (Docker) setup + how to load schema.sql
+├── DATABASE.md         # local MariaDB (Docker) setup + how to load schema.sql
+└── DEPLOY.md           # deploying to testing/production on Hostpoint -- see "Deployment" below
 ```
 
 No build step anywhere in this repo yet — every HTML file is self-contained and opens directly
@@ -135,8 +136,21 @@ Deliberately simplified for this local-dev-only pass (documented here rather tha
   environment and only with the exact token, so ordinary use (including a human testing manually
   in a browser) always emails as normal; see `AuthService::isTestBypass()`. Exists so running
   automated browser tests against the login/reset flow doesn't send a real email every time.
-- **The route editor** (`PUT /admin/routes`) is not implemented — `/routen` stays a stub page, per
-  README's "What's intentionally not designed yet" below (unchanged scope decision).
 - Reverse-geocoded `address`/`addressDistanceM` on submitted reports are always `null` — no
   geocoding service is wired up; these fields exist in the schema/API for when one is.
 - `POST /auth/logout` skips CSRF-token validation (no CSRF wiring set up for this JSON-only flow).
+
+## Deployment
+
+Beyond local dev, this app also runs on two more environments on Hostpoint, over SSH: **testing**
+and **production**. Every testing deploy starts by refreshing testing's database and uploads from
+a fresh copy of production's, so it's always validated against real data before anything gets
+promoted; promoting copies testing's exact, already-validated files into production, not a second
+build. Automatic pre-migration database backups, a destructive-migration guard, and maintenance
+mode around the risky window apply on both.
+
+See `DEPLOY.md` for the full picture — one-time setup, the `app/deploy/` scripts
+(`deploy.sh`, `promote.sh`, `refresh-test-from-prod.sh`), the safety mechanisms, and known
+gotchas. Real SSH connection details, server paths, and database/mail credentials for both
+environments live in `internals.md` and `app/deploy/deploy.env` — both gitignored, never
+committed; `DEPLOY.md` itself stays generic on purpose.
