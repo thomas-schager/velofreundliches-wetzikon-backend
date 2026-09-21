@@ -39,7 +39,7 @@ Deploys `rsync` straight into that directory, in place.
   This is what actually guarantees only the two databases configured in `deploy.env`
   (`DB_NAME_TEST`/`DB_NAME_PRODUCTION`) are ever touched; without it, "which database" would be
   entirely implicit in whatever `.env.local` happens to contain, with nothing catching a
-  miscopied or hand-edited file. See §9.5.
+  miscopied or hand-edited file. See §10.5.
 - A `mysqldump` backup is taken immediately before every migration run.
 - Pending migrations are dry-run first; if the SQL contains `DROP COLUMN`, `DROP TABLE`, or
   `TRUNCATE`, you must type `DESTROY` to proceed. This is a heuristic, not a guarantee — it
@@ -175,7 +175,35 @@ ever writes to testing's side.
 
 ---
 
-## 7. Database migrations
+## 7. Seeding production's initial route data from dev (one-time)
+
+Every other data-moving script here only copies between testing and production — both live on
+the same Hostpoint account, so nothing passes through your machine. Dev is different: it's
+local, and its database is where the route network actually gets drawn/edited during
+development. Nothing above ever puts that data anywhere else.
+
+```bash
+cd app
+./deploy/seed-prod-from-dev.sh
+```
+
+Checks production's `.env.local` names the expected database, asks you to type `production`,
+then: `mysqldump`s `route_types` and `route_features` from dev, `scp`s the dump into
+`<production_base_path>/app/var/` (never anywhere else on the server), imports it there, and
+deletes the uploaded file again. `ratings` and `route_backups` are deliberately excluded — dev's
+`ratings` rows are test-only data, not real reference values, and `route_backups` is dev's local
+edit history, not content worth carrying over.
+
+Run this **once**, before production has any real route data of its own — typically right after
+the first `deploy.sh production`/`promote.sh`, before pointing the public site at it. `mysqldump`'s
+default `DROP TABLE IF EXISTS` + `CREATE TABLE` means running it again later would silently wipe
+and replace whatever's since been edited directly in production, so don't re-run it as part of
+the normal release flow — it's not called by `deploy.sh`, `promote.sh`, or
+`refresh-test-from-prod.sh`.
+
+---
+
+## 8. Database migrations
 
 Doctrine migration classes are plain PHP with literal SQL in `up()`/`down()` — nothing about
 them inherently prevents data loss. Concretely, for this app: `reports`, `report_photos`,
@@ -198,7 +226,7 @@ ssh <ssh_user>@<ssh_host> "cd <base_path>/app && /usr/local/php85/bin/php bin/co
 
 ---
 
-## 8. Recovering from a failed deploy
+## 9. Recovering from a failed deploy
 
 If `deploy.sh`/`promote.sh` fails partway through *after* maintenance mode was entered, it's
 left **on** deliberately — the script prints the exact command to lift it once you've dealt with
@@ -215,16 +243,16 @@ then redeploy the normal way.
 
 ---
 
-## 9. Known issues and gotchas
+## 10. Known issues and gotchas
 
-### 9.1 Why maintenance mode starts *after* the file copy, not before
+### 10.1 Why maintenance mode starts *after* the file copy, not before
 
 Entering maintenance mode means renaming `maintenance.html.off` → `maintenance.html` on the
 server. If that happened *before* the `rsync`, the sync itself (source is always the repo's
 `.off` copy) would silently undo it via `--delete`. So the copy itself (a few seconds) isn't
 covered by maintenance mode — everything from cache-warming through migrations is.
 
-### 9.2 `parse_url()` doesn't decode percent-encoding
+### 10.2 `parse_url()` doesn't decode percent-encoding
 
 `remote/backup-db.sh`, `remote/refresh-db.sh`, and `remote/db-name.sh` pull values out of
 `DATABASE_URL` with PHP's `parse_url()`, which returns components exactly as written — still
@@ -234,19 +262,19 @@ server) silently sends mysqldump/mysql the *encoded* password and fails to authe
 
 Decoded credentials are `eval`'d directly into the calling shell, never written to a temp file
 — a `mktemp`'d file would land in the server's default temp directory, outside both named
-environment paths (see §9.5).
+environment paths (see §10.5).
 
-### 9.3 `var/route-backups/` and `public/uploads/` are real data
+### 10.3 `var/route-backups/` and `public/uploads/` are real data
 
 Both are excluded from every `rsync --delete` in `deploy.sh`/`promote.sh` specifically because
 they're user/editor-generated content, not code — same reasoning as `.env.local`.
 
-### 9.4 PHP CLI vs. web version
+### 10.4 PHP CLI vs. web version
 
 Confirmed identical here (`php85` both ways), but shared hosts commonly differ — worth
 rechecking if migrations succeed over SSH but the live site errors, or vice versa.
 
-### 9.5 Exactly what "only these two directories/databases" actually rests on
+### 10.5 Exactly what "only these two directories/databases" actually rests on
 
 Every filesystem path any script touches traces back to `REMOTE_BASE_PATH_TEST` or
 `REMOTE_BASE_PATH_PRODUCTION` from `deploy.env` — grep for `BASE_PATH` across `app/deploy/` and
@@ -268,7 +296,7 @@ named paths.
 
 ---
 
-## 10. Checklist
+## 11. Checklist
 
 **One-time**
 - [ ] `deploy.env` filled in, including `DB_NAME_TEST`/`DB_NAME_PRODUCTION` (done — real values
@@ -276,6 +304,8 @@ named paths.
 - [ ] `.env.local` uploaded to both environments (§3)
 - [ ] PHP version pinned to `php85` in Hostpoint's panel for both domains, confirmed live (done)
 - [ ] `Use php-fpm php85` present in `public/.htaccess`, matching `PHP_VERSION` in `deploy.env`
+- [ ] `./deploy/seed-prod-from-dev.sh` run once, after production's first deploy and before
+      going live (§7)
 
 **Every release**
 - [ ] `./deploy/deploy.sh test`, validated by hand
@@ -285,7 +315,7 @@ named paths.
 
 ---
 
-## 11. Environment variables reference
+## 12. Environment variables reference
 
 | Variable | Description |
 |---|---|
