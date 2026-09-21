@@ -20,6 +20,13 @@ final class Version20260903185437 extends AbstractMigration
     public function up(Schema $schema): void
     {
         // this up() migration is auto-generated, please modify it to your needs
+        //
+        // Reordered from the raw diff output: `ratings.rating`'s type change below fails with
+        // "Cannot change column 'rating': used in a foreign key constraint" unless
+        // fk_reports_rating is dropped first -- this migration was generated but never actually
+        // executed (marked applied without running on dev, see DATABASE.md), so this ordering
+        // bug was never caught until a real fresh-database run exercised it. See DEPLOY.md.
+        $this->addSql('ALTER TABLE reports DROP FOREIGN KEY `fk_reports_rating`');
         $this->addSql('ALTER TABLE admin_users CHANGE password_hash password_hash VARCHAR(255) NOT NULL, CHANGE role role VARCHAR(64) NOT NULL, CHANGE is_active is_active TINYINT NOT NULL, CHANGE created_at created_at DATETIME NOT NULL, CHANGE updated_at updated_at DATETIME NOT NULL');
         $this->addSql('ALTER TABLE auth_challenges CHANGE admin_user_id admin_user_id BIGINT UNSIGNED DEFAULT NULL, CHANGE purpose purpose VARCHAR(32) NOT NULL, CHANGE challenge_token challenge_token VARCHAR(128) NOT NULL, CHANGE code_hash code_hash VARCHAR(255) NOT NULL, CHANGE attempts attempts SMALLINT UNSIGNED NOT NULL, CHANGE reset_token reset_token VARCHAR(128) DEFAULT NULL, CHANGE created_at created_at DATETIME NOT NULL');
         $this->addSql('ALTER TABLE auth_challenges RENAME INDEX uq_auth_challenges_token TO UNIQ_19B0AA545BE52829');
@@ -28,7 +35,6 @@ final class Version20260903185437 extends AbstractMigration
         $this->addSql('ALTER TABLE ratings CHANGE rating rating SMALLINT UNSIGNED NOT NULL, CHANGE color color VARCHAR(7) NOT NULL');
         $this->addSql('ALTER TABLE report_photos CHANGE sort_order sort_order SMALLINT UNSIGNED NOT NULL, CHANGE created_at created_at DATETIME NOT NULL');
         $this->addSql('ALTER TABLE report_photos RENAME INDEX idx_report_photos_report TO IDX_218535464BD2A4C0');
-        $this->addSql('ALTER TABLE reports DROP FOREIGN KEY `fk_reports_rating`');
         $this->addSql('DROP INDEX idx_reports_location ON reports');
         $this->addSql('DROP INDEX fk_reports_rating ON reports');
         $this->addSql('DROP INDEX idx_reports_status ON reports');

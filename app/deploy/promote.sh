@@ -68,7 +68,9 @@ echo "==> Copying testing's files into production"
 "${SSH[@]}" "rsync -a --delete \
     --exclude='.env.local' \
     --exclude='var/' \
-    --exclude='public/uploads/' \
+    --include='public/uploads/' \
+    --include='public/uploads/.htaccess' \
+    --exclude='public/uploads/*' \
     '$REMOTE_BASE_PATH_TEST/app/' '$BASE_PATH/app/'"
 
 # See deploy.sh for why this happens after the copy, not before.

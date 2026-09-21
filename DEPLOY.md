@@ -133,11 +133,25 @@ No confirmation prompt for testing itself (it's meant to be overwritten every ti
 pending migration looks destructive, in which case it stops and asks for `DESTROY` regardless of
 environment.
 
-The code `rsync` excludes `.git`, `.env.local`, `var/`, `public/uploads/`, `compose.yaml`,
-`compose.override.yaml`, and — deliberately — **`deploy/` itself**, so `deploy.env` (SSH
-host/user/paths) and the generated `.env.local` files never leave your machine as part of a
-code deploy. (They'd be harmless even if uploaded, since `deploy/` sits outside the `app/public`
-document root and so is never web-accessible either way — excluded anyway, on principle.)
+**First deploy only:** migrations create `admin_users` empty — nothing seeds an actual account
+(unlike `ratings`/`route_types`, which the baseline migration seeds directly). Nobody can log in
+until you create one by hand, once, over SSH:
+```bash
+ssh <ssh_user>@<ssh_host> "cd <test_base_path>/app && /usr/local/php85/bin/php bin/console app:create-admin-user you@example.com 'a-strong-password' 'Your Name'"
+```
+Safe to re-run any time with the same email to reset that account's password/display name
+instead of creating a second one — see `CreateAdminUserCommand`.
+
+The code `rsync` excludes `.git`, `.env.local`, `var/`, `compose.yaml`, `compose.override.yaml`,
+and — deliberately — **`deploy/` itself**, so `deploy.env` (SSH host/user/paths) and the generated
+`.env.local` files never leave your machine as part of a code deploy. (They'd be harmless even if
+uploaded, since `deploy/` sits outside the `app/public` document root and so is never
+web-accessible either way — excluded anyway, on principle.) `public/uploads/*` is excluded the
+same way (real uploaded photos, never overwritten by a code deploy) except for
+`public/uploads/.htaccess` itself, which *is* code (blocks script execution inside that
+directory) and does need to reach the server — carried across via an explicit
+`--include`/`--exclude` pair rather than a blanket exclude, same in `promote.sh`'s server-side
+copy.
 
 ---
 
@@ -151,10 +165,17 @@ cd app
 Checks `PHP_VERSION`, checks the two base paths aren't identical, requires testing to have been
 deployed at least once, verifies *both* testing's and production's `.env.local` name their
 expected database, then asks you to type `production` to continue. Then: server-side `rsync` of
-testing's `app/` straight into production's `app/` (excluding `.env.local`, `var/`,
-`public/uploads/` — no rebuild, no re-upload from your machine) → maintenance mode → warm cache
-→ back up production's DB → dry-run + destructive migration check → run migrations →
-maintenance mode off.
+testing's `app/` straight into production's `app/` (excluding `.env.local`, `var/`, and
+`public/uploads/*` except `.htaccess`, same carve-out as §4 — no rebuild, no re-upload from your
+machine) → maintenance mode → warm cache → back up production's DB → dry-run + destructive
+migration check → run migrations → maintenance mode off.
+
+**First deploy only:** same as testing (§4) — `admin_users` starts empty, promoting files and
+running migrations doesn't create an account. Production needs its own, with its own password,
+created the same way once it's reachable:
+```bash
+ssh <ssh_user>@<ssh_host> "cd <production_base_path>/app && /usr/local/php85/bin/php bin/console app:create-admin-user you@example.com 'a-different-strong-password' 'Your Name'"
+```
 
 ---
 
@@ -306,6 +327,8 @@ named paths.
 - [ ] `Use php-fpm php85` present in `public/.htaccess`, matching `PHP_VERSION` in `deploy.env`
 - [ ] `./deploy/seed-prod-from-dev.sh` run once, after production's first deploy and before
       going live (§7)
+- [ ] `app:create-admin-user` run once per environment, after that environment's first deploy
+      (§4/§5) — `admin_users` starts empty, nobody can log in without this
 
 **Every release**
 - [ ] `./deploy/deploy.sh test`, validated by hand

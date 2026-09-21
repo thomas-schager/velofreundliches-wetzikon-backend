@@ -105,7 +105,9 @@ rsync -az --delete \
     --exclude='.git' \
     --exclude='.env.local' \
     --exclude='var/' \
-    --exclude='public/uploads/' \
+    --include='public/uploads/' \
+    --include='public/uploads/.htaccess' \
+    --exclude='public/uploads/*' \
     --exclude='deploy/' \
     --exclude='compose.yaml' \
     --exclude='compose.override.yaml' \

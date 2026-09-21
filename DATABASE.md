@@ -3,13 +3,25 @@
 A working Symfony application now exists in `app/` (see `README.md`'s Status section) and runs
 against exactly this schema. This doc still covers getting a local MariaDB instance running and
 loading `database/schema.sql` into it from scratch; **Doctrine Migrations is now the actual
-schema-change mechanism** going forward (see `docs/api-implementation-strategy.md` §7) — a
-baseline migration (`app/migrations/Version20260903185437.php`) has already been generated via
-`doctrine:migrations:diff` and marked as applied (`doctrine:migrations:version --add`) *without*
-being executed, so the hand-loaded schema below stays byte-for-byte what's actually in the
-database, and any future entity change gets its own real, executed migration from this point on.
-`app/src/Entity/*.php` — not this file — is now the source of truth for the schema; re-derive
-`schema.sql` from the entities if it ever needs to be regenerated, rather than hand-editing both.
+schema-change mechanism** going forward (see `docs/api-implementation-strategy.md` §7).
+
+`app/migrations/Version20260903000000.php` is the real baseline -- `CREATE TABLE` for all seven
+original tables plus the `ratings`/`route_types` seed data, copied verbatim from `schema.sql`
+below. It exists so a genuinely empty database (testing/production on their first deploy, see
+DEPLOY.md §8) can build the whole schema via `doctrine:migrations:migrate` alone. On dev, since
+the tables here were already created by hand-loading `schema.sql`, it's marked applied
+(`doctrine:migrations:version --add`) *without* being executed -- same reasoning as below.
+
+`app/migrations/Version20260903185437.php` is the first *real* schema change after that baseline
+(column type/constraint cleanup) -- it was originally marked applied without running here too,
+which is why the hand-loaded schema below matches its column defs, not that migration's. **That
+migration has since been fixed (a statement-ordering bug meant it would never actually have run
+successfully) but still hasn't been executed against dev** -- dev's live schema is still on the
+pre-that-migration column types until it's actually run for real here (it now runs cleanly against
+a fresh database, verified against a scratch copy of this schema; not yet re-verified against dev
+directly). `app/src/Entity/*.php` — not this file — is now the source of truth for the schema;
+re-derive `schema.sql` from the entities if it ever needs to be regenerated, rather than
+hand-editing both.
 
 ## Why MariaDB
 
