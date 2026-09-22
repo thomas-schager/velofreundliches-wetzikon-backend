@@ -101,8 +101,11 @@ class AuthService
     /**
      * Always "succeeds" outwardly regardless of whether the email exists (avoid leaking which
      * addresses have an account) -- see openapi.yaml's /auth/forgot-password description.
+     * maskedEmail masks the *submitted* address, not the account's stored one -- it's always
+     * available (unlike a possibly-nonexistent user's own email) and doesn't leak anything the
+     * caller didn't already type themselves.
      *
-     * @return array{challengeToken: string, devCode: ?string}
+     * @return array{challengeToken: string, maskedEmail: string, devCode: ?string}
      */
     public function requestPasswordReset(string $email, ?string $testBypassToken = null): array
     {
@@ -115,6 +118,7 @@ class AuthService
 
         return [
             'challengeToken' => $challenge->getChallengeToken(),
+            'maskedEmail' => $this->maskEmail($email),
             'devCode' => $this->environment === 'dev' ? $code : null,
         ];
     }
