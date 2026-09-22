@@ -1,6 +1,14 @@
 doctrine:
     dbal:
-        url: '%env(resolve:DATABASE_URL)%'
+        # Deliberately not `resolve:DATABASE_URL` -- that processor re-scans the env var's own
+        # value for %...% and substitutes them as container parameters (for composing a DSN out
+        # of other parameters, e.g. %database_host%). Nothing here does that -- every .env.local
+        # is one self-contained, already-complete DSN -- and the plain `env()` form below is
+        # actively required once a DB password needs percent-encoding (any of : / ? # [ ] @ ! $
+        # & ' ( ) * + , ; = in it, see RFC 3986): `resolve:` was crashing with "non-existent
+        # parameter" on production/testing's password (e.g. ...Tp%21V%2A... from `!`/`*`) because
+        # it read the literal substring between two `%` as a parameter name to look up.
+        url: '%env(DATABASE_URL)%'
 
         # IMPORTANT: You MUST configure your server version,
         # either here or in the DATABASE_URL env var (see .env file)

@@ -39,7 +39,7 @@ Deploys `rsync` straight into that directory, in place.
   This is what actually guarantees only the two databases configured in `deploy.env`
   (`DB_NAME_TEST`/`DB_NAME_PRODUCTION`) are ever touched; without it, "which database" would be
   entirely implicit in whatever `.env.local` happens to contain, with nothing catching a
-  miscopied or hand-edited file. See §10.5.
+  miscopied or hand-edited file. See §10.6.
 - A `mysqldump` backup is taken immediately before every migration run.
 - Pending migrations are dry-run first; if the SQL contains `DROP COLUMN`, `DROP TABLE`, or
   `TRUNCATE`, you must type `DESTROY` to proceed. This is a heuristic, not a guarantee — it
@@ -283,19 +283,34 @@ server) silently sends mysqldump/mysql the *encoded* password and fails to authe
 
 Decoded credentials are `eval`'d directly into the calling shell, never written to a temp file
 — a `mktemp`'d file would land in the server's default temp directory, outside both named
-environment paths (see §10.5).
+environment paths (see §10.6).
 
 ### 10.3 `var/route-backups/` and `public/uploads/` are real data
 
 Both are excluded from every `rsync --delete` in `deploy.sh`/`promote.sh` specifically because
 they're user/editor-generated content, not code — same reasoning as `.env.local`.
 
-### 10.4 PHP CLI vs. web version
+### 10.4 `composer install --no-dev` runs in your own local dev checkout
+
+`deploy.sh`'s local build step (`cd app && composer install --no-dev ...`) runs in the *same*
+`app/` directory you use for local dev, not a separate build copy — so every deploy temporarily
+strips dev-only packages (`symfony/maker-bundle`, etc.) from `vendor/`. Composer's own
+post-install auto-scripts (`cache:clear`, from `composer.json`'s `auto-scripts`) used to run
+right after that, against your local `.env.local`'s `APP_ENV=dev` — booting the dev kernel with
+`MakerBundle` missing from `vendor/` but still registered in `config/bundles.php` for `dev`,
+which crashed with `ClassNotFoundError` and left local dev broken (`bin/console` itself wouldn't
+boot) until `composer install` was run again by hand. Fixed two ways: the build now passes
+`--no-scripts` (that `cache:clear` was always redundant anyway — the real one runs remotely with
+`--env=prod` later in the same script), and `deploy.sh`'s cleanup trap now always restores the
+full local install (`composer install`, dev deps included) on exit, success or failure, so a
+deploy can no longer leave your own working copy in a broken state.
+
+### 10.5 PHP CLI vs. web version
 
 Confirmed identical here (`php85` both ways), but shared hosts commonly differ — worth
 rechecking if migrations succeed over SSH but the live site errors, or vice versa.
 
-### 10.5 Exactly what "only these two directories/databases" actually rests on
+### 10.6 Exactly what "only these two directories/databases" actually rests on
 
 Every filesystem path any script touches traces back to `REMOTE_BASE_PATH_TEST` or
 `REMOTE_BASE_PATH_PRODUCTION` from `deploy.env` — grep for `BASE_PATH` across `app/deploy/` and

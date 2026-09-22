@@ -57,8 +57,13 @@ else
 fi
 
 MAINTENANCE_BASE=""
+LOCAL_BUILD_RAN=""
 cleanup() {
     local exit_code=$?
+    if [[ -n "$LOCAL_BUILD_RAN" ]]; then
+        echo "==> Restoring local dev dependencies (composer install --no-dev stripped them above)" >&2
+        (cd "$APP_DIR" && composer install --no-interaction) >&2 || echo "WARNING: failed to restore local dev deps -- run 'composer install' in app/ by hand." >&2
+    fi
     if [[ -n "$MAINTENANCE_BASE" ]]; then
         if [[ $exit_code -eq 0 ]]; then
             exit_maintenance "$MAINTENANCE_BASE"
@@ -98,7 +103,16 @@ fi
 
 echo "==> Building locally (composer install --no-dev)"
 cd "$APP_DIR"
-composer install --no-dev --optimize-autoloader --no-interaction
+# --no-scripts: Composer's post-install auto-scripts (cache:clear, assets:install) would
+# otherwise run here against the LOCAL checkout's own .env.local (APP_ENV=dev) -- but --no-dev
+# just removed symfony/maker-bundle from vendor/, which config/bundles.php still registers for
+# the dev environment, so cache:clear crashes with a ClassNotFoundError and leaves this same
+# local checkout (also used for day-to-day dev work) with its dev dependencies missing. None of
+# this is needed anyway -- cache:clear runs for real, remotely, with --env=prod, later in this
+# script. LOCAL_BUILD_RAN is used below to restore composer's full (dev-included) install once
+# this script exits, so local dev is never left broken by a deploy.
+composer install --no-dev --no-scripts --optimize-autoloader --no-interaction
+LOCAL_BUILD_RAN=1
 
 echo "==> Uploading code to $BASE_PATH/app"
 rsync -az --delete \
