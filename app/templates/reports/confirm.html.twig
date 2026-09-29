@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+{#
+  Landing page for the link in the VeloMelder confirmation email (see
+  ReportSubmissionService::submit()/confirmEmail() and PublicReportsController::confirm()).
+  Standalone, not extending base.html.twig -- that layout is for the admin dashboard shell, and
+  this page is reached by a member of the public who just submitted a report, not an admin. Styled
+  to match app/public/velomelder-gelbes-band.html (the VeloMelder tool itself) rather than the
+  admin app's own assets/admin.css, since this is a continuation of that same journey: same
+  vendored --vw- token subset (see that file's own COMPILE:TOKENS-derived comment for why it's a
+  local copy, not the shared assets/tokens.css this app's admin views use).
+#}
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ status == 'confirmed' ? 'Bestätigt' : (status == 'expired' ? 'Link abgelaufen' : 'Link ungültig') }} — VeloMelder</title>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --vw-primary:        #ff5544;
+  --vw-dark:           #3a3a3a;
+  --vw-success-dark:   #3aa84a;
+  --vw-bg:             #fafaf8;
+  --vw-surface:        #ffffff;
+  --vw-border:         #e8e6e0;
+  --vw-muted:          #6b6b67;
+  --vw-muted-strong:   #5e5e5a;
+  --vw-font-display:   'Jost', system-ui, sans-serif;
+  --vw-font-body:      'Roboto', system-ui, sans-serif;
+  --vw-radius-md:      8px;
+  --vw-radius-full:    999px;
+  --vw-shadow-md:      0 1px 2px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.04);
+  --text-xs:   12px;
+  --text-sm:   14px;
+  --text-xl:   22px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; font-family: var(--vw-font-body); color: var(--vw-dark); background: var(--vw-bg); }
+body { display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 24px 20px; }
+
+.logo { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 40px; }
+.logo__bar { width: 5px; height: 26px; border-radius: 1px; background: #dc3406; }
+.logo__text { display: flex; flex-direction: column; line-height: 1.25; }
+.logo__top { font-family: var(--vw-font-display); font-weight: 500; font-size: var(--text-xs); letter-spacing: 0.01em; }
+.logo__bottom { font-family: var(--vw-font-display); font-weight: 700; font-size: var(--text-xs); letter-spacing: 0.14em; }
+
+.card {
+  background: var(--vw-surface); border: 1px solid var(--vw-border); border-radius: var(--vw-radius-md);
+  box-shadow: var(--vw-shadow-md); max-width: 420px; width: 100%; padding: 32px 28px;
+  text-align: center; margin-top: auto; margin-bottom: auto;
+}
+.card svg { margin-bottom: 16px; }
+.card h1 { font-family: var(--vw-font-display); font-size: var(--text-xl); font-weight: 600; margin: 0 0 12px; letter-spacing: -0.01em; }
+.card p { font-size: var(--text-sm); color: var(--vw-muted-strong); line-height: 1.55; margin: 0 0 24px; }
+
+.btn-back {
+  display: inline-flex; align-items: center; justify-content: center; padding: 12px 24px;
+  border-radius: var(--vw-radius-full); background: var(--vw-primary); color: #fff; font-family: var(--vw-font-body);
+  font-size: var(--text-sm); font-weight: 500; text-decoration: none; transition: background 150ms;
+}
+.btn-back:hover { background: #e84a3a; }
+</style>
+</head>
+<body>
+
+<div class="logo" role="img" aria-label="Velofreundliches Wetzikon">
+  <span class="logo__bar"></span>
+  <span class="logo__text">
+    <span class="logo__top">velofreundliches</span>
+    <span class="logo__bottom">WETZIKON</span>
+  </span>
+</div>
+
+<div class="card">
+  {% if status == 'confirmed' %}
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--vw-success-dark)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l2.5 2.5L16 9"/></svg>
+    <h1>Bestätigt — danke!</h1>
+    <p>Deine Meldung wird nun von unserem Team geprüft. Sobald sie freigegeben ist, erscheint sie auf der Karte.</p>
+  {% elseif status == 'expired' %}
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#c9a227" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+    <h1>Link abgelaufen</h1>
+    <p>Dieser Bestätigungslink ist nicht mehr gültig. Bitte reiche deine Meldung erneut ein, um einen neuen Link zu erhalten.</p>
+  {% else %}
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--vw-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <h1>Link ungültig</h1>
+    <p>Dieser Bestätigungslink ist unbekannt oder wurde bereits verwendet. Prüfe, ob du den richtigen Link aus der E-Mail geöffnet hast.</p>
+  {% endif %}
+  <a class="btn-back" href="{{ backUrl }}">{{ backLabel }}</a>
+</div>
+
+</body>
+</html>

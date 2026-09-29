@@ -27,6 +27,8 @@ class PublicReportsController extends AbstractApiController
         private readonly ReportRepository $reports,
         private readonly ReportSubmissionService $submissionService,
         private readonly CaptchaChallengeService $captcha,
+        private readonly string $velomelderBackUrl,
+        private readonly string $velomelderBackLabel,
     ) {
     }
 
@@ -91,14 +93,25 @@ class PublicReportsController extends AbstractApiController
     #[Route('/reports/confirm/{token}', name: 'api_reports_confirm', methods: ['GET'])]
     public function confirm(string $token): Response
     {
+        // This link is opened directly in a browser from the confirmation email, by a member of
+        // the public -- not an API consumer -- so it renders a branded HTML landing page (styled
+        // like the VeloMelder tool itself) instead of the raw JSON/plain-text this used to return.
+        $status = 'confirmed';
+        $httpStatus = 200;
         try {
             $this->submissionService->confirmEmail($token);
         } catch (ReportNotFoundException $e) {
-            return $this->errorResponse('not_found', $e->getMessage(), 404);
+            $status = 'not_found';
+            $httpStatus = 404;
         } catch (ExpiredChallengeException $e) {
-            return $this->errorResponse('expired', $e->getMessage(), 410);
+            $status = 'expired';
+            $httpStatus = 410;
         }
 
-        return new Response('Bestätigt — deine Meldung wartet nun auf die Prüfung durch die Redaktion.', 200);
+        return $this->render('reports/confirm.html.twig', [
+            'status' => $status,
+            'backUrl' => $this->velomelderBackUrl,
+            'backLabel' => $this->velomelderBackLabel,
+        ], new Response('', $httpStatus));
     }
 }

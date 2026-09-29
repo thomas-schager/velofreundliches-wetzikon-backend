@@ -17,6 +17,11 @@ parameters:
     app.test_bypass_token: '%env(APP_TEST_BYPASS_TOKEN)%'
     # Not web-served, not committed -- see AuthService's use of this parameter.
     app.test_bypass_file: '%kernel.project_dir%/var/test-2fa-code.txt'
+    # "Back to the map" link on the VeloMelder email-confirmation landing page (see
+    # templates/reports/confirm.html.twig / PublicReportsController::confirm()) -- kept here so
+    # both the target and its label can be changed in one place without touching the template.
+    app.velomelder_back_url: '/velomelder-gelbes-band.html'
+    app.velomelder_back_label: 'Zurück zur Karte'
 
 services:
     # default configuration for services in *this* file
@@ -29,6 +34,8 @@ services:
             string $routeBackupsDir: '%app.route_backups_dir%'
             string $testBypassToken: '%app.test_bypass_token%'
             string $testBypassFile: '%app.test_bypass_file%'
+            string $velomelderBackUrl: '%app.velomelder_back_url%'
+            string $velomelderBackLabel: '%app.velomelder_back_label%'
 
     # makes classes in src/ available to be used as services
     # this creates a service per class whose id is the fully-qualified class name
