@@ -64,8 +64,8 @@ class ReportSubmissionService
         if ($rating === false || $rating < 1 || $rating > 5) {
             $errors['rating'] = 'must be 1-5';
         }
-        if (mb_strlen($comment) < 10 || mb_strlen($comment) > 2000) {
-            $errors['comment'] = 'must be 10-2000 characters';
+        if (mb_strlen($comment) < 20 || mb_strlen($comment) > 2000) {
+            $errors['comment'] = 'must be 20-2000 characters';
         }
         if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $errors['email'] = 'must be a valid email address';

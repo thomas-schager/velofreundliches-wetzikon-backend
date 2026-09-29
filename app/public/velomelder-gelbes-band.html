@@ -1,0 +1,1700 @@
+<!doctype html>
+<!--
+  Standalone public page: full-size map of ONLY the "Vorschlag gelbes Band" route type, with a
+  click-to-report feedback tool. Deliberately built fresh here rather than as a new compiled view
+  in VeloWetzikon_Contao/public/additions/ (see .claude/skills/compile-velo-views/SKILL.md there)
+  -- this page talks to a live backend (GET /route-types, /routes, /reports and POST /reports),
+  not the static velo-routes.geojson/velo-meldungen.json files those views fetch, so it doesn't
+  fit that skill's "view" model. It follows the same underlying map engine/rendering logic (tile
+  layers, panes per route type, band width scaling, direction arrows, Chaikin smoothing) --
+  ported from velo-melder.html's COMPILE:MAP-ENGINE / COMPILE:ROUTE-RENDER blocks -- AND the same
+  "Meldung einreichen" form and its map interaction (location preview, drag-to-adjust pin,
+  reverse geocoding, photo upload, arithmetic captcha), ported near-verbatim from that same file
+  so the reporting experience matches exactly. The one real difference: that file's submit only
+  pushes into an in-memory array (no backend exists there); this page actually POSTs to /reports.
+
+  Only one route type exists here, so there's no legend/type-toggle UI at all (removed
+  deliberately, not simplified from an original that had one) and ROUTE_TYPES comes from
+  GET /route-types rather than a hand-duplicated JS array (matching this repo's own
+  RegistryController docblock: "Replaces ... the hand-duplicated ROUTE_TYPES JS array").
+
+  Must be served from the SAME origin as the API (no CORS is configured on the backend) -- hence
+  living in app/public/, not a separate static host. All API calls below use relative paths on
+  purpose, so this one file works unmodified on whichever environment serves it (testing today,
+  production later via the normal promote.sh flow) without a hardcoded domain.
+-->
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vorschlag gelbes Band – Rückmeldung</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* COMPILE:TOKENS-derived -- copied from velo-melder.html's :root block (see that file's
+   COMPILE:TOKENS marker), same values, so this page's colors/type/motion match the rest of the
+   Velo tooling exactly. */
+:root {
+  --vw-primary:        #ff5544;
+  --vw-primary-hover:  #e84a3a;
+  --vw-primary-press:  #d8412f;
+  --vw-primary-tint:   #ffece8;
+  --vw-dark:           #3a3a3a;
+  --vw-success:        #61ce70;
+  --vw-success-dark:   #3aa84a;
+  --vw-bg:             #fafaf8;
+  --vw-surface:        #ffffff;
+  --vw-surface-2:      #f4f3ef;
+  --vw-border:         #e8e6e0;
+  --vw-border-strong:  #cfcdc6;
+  --vw-muted:          #6b6b67;
+  --vw-muted-strong:   #5e5e5a;
+  --vw-font-display:   'Jost', system-ui, sans-serif;
+  --vw-font-body:      'Roboto', system-ui, sans-serif;
+  --vw-ease:           cubic-bezier(.2,.7,.3,1);
+  --vw-dur:            180ms;
+  --vw-radius-sm:      4px;
+  --vw-radius-md:      8px;
+  --vw-radius-lg:      12px;
+  --vw-radius-full:    999px;
+  --vw-shadow-sm:      0 1px 2px rgba(0,0,0,0.04);
+  --vw-shadow-md:      0 1px 2px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.04);
+  --vw-shadow-lg:      0 2px 4px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06);
+  --c1: #b91c1c; --c2: #ea580c; --c3: #ca8a04; --c4: #65a30d; --c5: #15803d;
+  /* Canonical type-scale tokens (--text-.. and --lh-..), unprefixed on purpose -- matches
+     VeloWetzikon_Design_Tokens tokens.css and the live public site's colors_and_type.css
+     verbatim, unlike the --vw- set above, which is this file's own subset copied from
+     velo-melder.html's partial COMPILE:TOKENS mirror. That mirror (and velo-melder.html's own
+     CSS built on it) never vendored the type scale at all -- every font-size in it is a
+     hand-picked px value, some on-scale by coincidence, some not. Only including the steps
+     actually used below, not the full ladder up to text-6xl. */
+  --text-xs:   12px;
+  --text-sm:   14px;
+  --text-base: 16px;
+  --text-xl:   22px;
+  --lh-normal:  1.45;
+  --lh-relaxed: 1.6;
+  /* Same rationale as the type-scale block above -- canonical, unprefixed spacing tokens from
+     tokens.css, not part of the --vw- subset. Only the steps actually used below. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; font-family: var(--vw-font-body); color: var(--vw-dark); }
+#map { position: absolute; inset: 0; top: 56px; cursor: crosshair !important; }
+
+/* Header */
+header {
+  position: absolute; top: 0; left: 0; right: 0; height: 56px; z-index: 1000;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 0 16px; background: rgba(255,255,255,0.92); backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--vw-border);
+}
+.logo { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.logo__bar { width: 5px; height: 26px; border-radius: 1px; background: #dc3406; flex-shrink: 0; }
+.logo__text { display: flex; flex-direction: column; line-height: 1.25; }
+.logo__top { font-family: var(--vw-font-display); font-weight: 500; font-size: var(--text-xs); letter-spacing: 0.01em; }
+.logo__bottom { font-family: var(--vw-font-display); font-weight: 700; font-size: var(--text-xs); letter-spacing: 0.14em; }
+.header-hint { font-size: var(--text-xs); color: var(--vw-muted); display: none; }
+@media (min-width: 720px) { .header-hint { display: block; } }
+
+/* Map chrome */
+.map-toggle {
+  position: absolute; top: 68px; right: 12px; z-index: 900;
+  display: flex; background: var(--vw-surface); border-radius: var(--vw-radius-full);
+  box-shadow: var(--vw-shadow-md); overflow: hidden; border: 1px solid var(--vw-border);
+}
+.map-toggle button {
+  border: none; background: transparent; padding: 7px 14px; font: 500 var(--text-xs) var(--vw-font-body);
+  color: var(--vw-muted-strong); cursor: pointer;
+}
+.map-toggle button.active { background: var(--vw-dark); color: #fff; }
+
+/* ============================================================================================
+   FORM/MODAL -- ported from velo-melder.html verbatim (see that file's "Meldung einreichen"
+   modal and its supporting CSS), same class names throughout, so this page's report form and
+   its map interaction (preview map, drag-to-adjust location, captcha, photo upload) are
+   identical to the canonical tool. Only the submit target differs (real POST here vs. that
+   file's local-only in-memory push) -- see #modal-success-view and submitEntry() below, which
+   don't exist there since it has no backend to confirm against.
+   ============================================================================================ */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  z-index: 2000;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--vw-dur) var(--vw-ease);
+}
+.modal-overlay.open { opacity: 1; pointer-events: all; }
+
+.modal {
+  background: var(--vw-surface);
+  border: 1px solid var(--vw-border);
+  border-radius: 0;
+  width: 100%; max-width: 100%; height: 100%; max-height: 100%;
+  margin: 0; box-sizing: border-box; box-shadow: none; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.modal-left {
+  flex: 1; padding: var(--space-5); min-width: 0;
+  overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column; position: relative;
+  -webkit-overflow-scrolling: touch;
+}
+.modal-map-inline {
+  position: relative; border-radius: var(--vw-radius-sm); overflow: hidden;
+  border: 1px solid var(--vw-border); margin-bottom: 0; flex-shrink: 0; height: 180px;
+  transition: border-color 180ms var(--vw-ease), box-shadow 180ms var(--vw-ease);
+}
+#preview-map-mobile { width: 100%; height: 100%; }
+.modal-right { display: none; }
+
+@media (min-width: 600px) {
+  .modal {
+    width: 520px; max-width: 94vw; height: auto; max-height: 88dvh;
+    border-radius: var(--vw-radius-lg); box-shadow: var(--vw-shadow-lg);
+    transform: translateY(12px); transition: transform var(--vw-dur) var(--vw-ease);
+    flex-direction: column;
+  }
+  .modal-overlay.open .modal { transform: translateY(0); }
+  .modal-left { padding: var(--space-6) var(--space-6) var(--space-5); }
+}
+@media (min-width: 900px) {
+  .modal { width: 820px; max-width: 92vw; flex-direction: row; }
+  .modal-map-inline { display: none; }
+  .modal-right { display: block; flex: 0 0 340px; position: relative; border-left: 1px solid var(--vw-border); }
+  #preview-map-desktop { width: 100%; height: 100%; min-height: 400px; }
+}
+
+.preview-crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); pointer-events: none; z-index: 1000; }
+
+/* On-scale: was 20px (between --text-lg/--text-xl, ported verbatim from velo-melder.html's own
+   off-scale value), now --text-xl. */
+.modal-title { font-family: var(--vw-font-display); font-size: var(--text-xl); font-weight: 600; color: var(--vw-dark); margin-bottom: 4px; letter-spacing: -0.01em; line-height: 1.2; }
+.modal-coords { font-family: var(--vw-font-body); font-size: var(--text-xs); color: var(--vw-muted); margin-bottom: 2px; }
+.modal-address { font-size: var(--text-sm); color: var(--vw-dark); font-weight: 500; min-height: 1.4em; margin-bottom: 6px; font-family: var(--vw-font-body); }
+.address-loading { font-size: var(--text-sm); color: var(--vw-muted); font-style: italic; font-weight: 400; }
+
+.field-label { display: block; font-family: var(--vw-font-body); font-size: var(--text-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--vw-muted); margin-bottom: var(--space-2); }
+.field-label .required { color: var(--vw-primary); margin-left: 2px; }
+
+.rating-scale { display: flex; gap: 6px; margin-bottom: 6px; }
+.rating-btn { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; border: none; background: transparent; cursor: pointer; padding: 0 0 var(--space-1); min-height: 44px; }
+.rating-btn .r-bar { width: 100%; height: 36px; border-radius: var(--vw-radius-sm); outline: 3px solid transparent; outline-offset: 2px; transition: outline-color var(--vw-dur) var(--vw-ease); flex-shrink: 0; }
+.rating-btn[data-r="1"] .r-bar { background: var(--c1); } .rating-btn[data-r="2"] .r-bar { background: var(--c2); }
+.rating-btn[data-r="3"] .r-bar { background: var(--c3); } .rating-btn[data-r="4"] .r-bar { background: var(--c4); }
+.rating-btn[data-r="5"] .r-bar { background: var(--c5); }
+.rating-btn .r-label { font-family: var(--vw-font-body); font-size: var(--text-xs); font-weight: 400; color: var(--vw-muted); padding: 5px 2px 0; text-align: center; line-height: 1.2; transition: color var(--vw-dur) var(--vw-ease), font-weight var(--vw-dur); width: 100%; overflow: hidden; word-break: break-word; hyphens: auto; }
+.rating-btn:hover .r-label { color: var(--vw-dark); }
+.rating-btn[data-r="1"].selected .r-bar { outline-color: var(--c1); } .rating-btn[data-r="2"].selected .r-bar { outline-color: var(--c2); }
+.rating-btn[data-r="3"].selected .r-bar { outline-color: var(--c3); } .rating-btn[data-r="4"].selected .r-bar { outline-color: var(--c4); }
+.rating-btn[data-r="5"].selected .r-bar { outline-color: var(--c5); }
+.rating-btn[data-r="1"].selected .r-label { color: var(--c1); font-weight: 500; } .rating-btn[data-r="2"].selected .r-label { color: var(--c2); font-weight: 500; }
+.rating-btn[data-r="3"].selected .r-label { color: var(--c3); font-weight: 500; } .rating-btn[data-r="4"].selected .r-label { color: var(--c4); font-weight: 500; }
+.rating-btn[data-r="5"].selected .r-label { color: var(--c5); font-weight: 500; }
+.rating-fieldset { border: none; padding: 0; margin: 0; min-width: 0; }
+.rating-fieldset .field-label { margin-bottom: var(--space-2); }
+.field-optional { font-weight: 400; text-transform: none; letter-spacing: 0; font-size: var(--text-sm); color: var(--vw-muted); }
+
+.validation-hint { font-size: var(--text-xs); color: var(--vw-primary); margin-top: var(--space-1); display: none; font-family: var(--vw-font-body); }
+.validation-hint.visible { display: block; }
+.rating-scale.field-invalid .rating-btn .r-bar { box-shadow: 0 0 0 3px rgba(255,85,68,0.12); border-radius: var(--vw-radius-sm); }
+
+textarea { width: 100%; background: var(--vw-surface); border: 1px solid var(--vw-border-strong); border-radius: var(--vw-radius-sm); padding: 10px var(--space-3); color: var(--vw-dark); font-family: var(--vw-font-body); font-size: var(--text-base); line-height: 1.55; resize: vertical; min-height: 148px; transition: border-color var(--vw-dur) var(--vw-ease), box-shadow var(--vw-dur); outline: none; }
+textarea:focus { border-color: var(--vw-primary); box-shadow: 0 0 0 3px rgba(255,85,68,0.15); }
+textarea.field-valid { border-color: var(--vw-success-dark); box-shadow: 0 0 0 3px rgba(58,168,74,0.12); }
+textarea.field-invalid { border-color: var(--vw-primary); box-shadow: 0 0 0 3px rgba(255,85,68,0.12); }
+.char-counter { font-size: var(--text-xs); font-family: var(--vw-font-body); color: var(--vw-muted); text-align: right; margin-top: 3px; }
+.char-counter.ok { color: var(--vw-success-dark); }
+
+.form-section { margin-top: var(--space-5); }
+
+.upload-area { border: 1px dashed var(--vw-border-strong); border-radius: var(--vw-radius-sm); padding: 14px 10px; text-align: center; cursor: pointer; transition: border-color var(--vw-dur) var(--vw-ease), background var(--vw-dur); margin-top: 2px; position: relative; background: var(--vw-surface-2); min-height: 52px; display: flex; align-items: center; justify-content: center; }
+.upload-area:hover, .upload-area.drag-over { border-color: var(--vw-border-strong); background: var(--vw-surface-2); }
+.upload-area input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.upload-hint { font-size: var(--text-sm); color: var(--vw-muted-strong); line-height: 1.5; font-family: var(--vw-font-body); }
+.upload-hint strong { color: var(--vw-dark); font-weight: 500; }
+.photo-previews { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: 10px; }
+.photo-thumb { position: relative; width: 60px; height: 60px; border-radius: var(--vw-radius-sm); overflow: hidden; border: 1px solid var(--vw-border); flex-shrink: 0; }
+.photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; cursor: pointer; }
+.photo-thumb-remove { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,0.45); color: #fff; border: none; cursor: pointer; font-size: 11px; display: flex; align-items: center; justify-content: center; padding: 0; transition: background var(--vw-dur); }
+.photo-thumb-remove:hover { background: rgba(185,28,28,0.85); }
+
+.location-edit-bar { display: flex; align-items: center; justify-content: space-between; margin-top: var(--space-4); margin-bottom: var(--space-5); min-height: 40px; }
+.map-location-controls { position: absolute; top: 8px; left: 8px; z-index: 1000; display: flex; align-items: center; gap: var(--space-4); background: var(--vw-surface); border: 1px solid var(--vw-border); border-radius: var(--vw-radius-sm); padding: 6px 10px; box-shadow: var(--vw-shadow-sm); }
+.location-edit-link { font-family: var(--vw-font-body); font-size: var(--text-sm); color: var(--vw-primary); background: none; border: none; cursor: pointer; padding: 10px 0; text-decoration: underline; text-underline-offset: 2px; display: flex; align-items: center; gap: 5px; white-space: nowrap; transition: color var(--vw-dur) var(--vw-ease); }
+.location-edit-link:hover { color: var(--vw-primary-hover); }
+.location-edit-link--muted { color: var(--vw-muted-strong); }
+.location-edit-link--muted:hover { color: var(--vw-dark); }
+.location-edit-actions { display: none; align-items: center; gap: 16px; }
+.location-edit-actions.visible { display: flex; }
+
+.modal-map-inline.edit-mode, .modal-right.edit-mode { border-color: var(--vw-primary); box-shadow: 0 0 0 2px var(--vw-primary-tint); }
+.modal-map-inline.edit-mode #preview-map-mobile, .modal-right.edit-mode #preview-map-desktop { cursor: crosshair !important; }
+.preview-crosshair.edit-pulse circle { animation: pulse-ring 1.2s ease-out infinite; }
+@keyframes pulse-ring { 0% { r: 4; opacity: 1; } 100% { r: 10; opacity: 0; } }
+.edit-mode-hint { position: absolute; top: 10%; left: 50%; transform: translateX(-50%); background: rgba(58,58,58,0.85); color: #fff; font-family: var(--vw-font-body); font-size: var(--text-xs); padding: 5px var(--space-3); border-radius: var(--vw-radius-full); white-space: nowrap; pointer-events: none; z-index: 1001; display: none; }
+.edit-mode .edit-mode-hint { display: block; }
+.edit-mode .edit-mode-hint.hint-hidden { display: none; }
+@media (min-width: 900px) { .edit-mode-hint { top: auto; bottom: 25%; } }
+
+.address-row { display: flex; align-items: baseline; gap: var(--space-2); margin-bottom: var(--space-5); }
+.address-row .modal-address { margin-bottom: 0; flex: 1; }
+@media (min-width: 900px) { #location-edit-bar { display: none; } }
+
+.field-note { font-size: var(--text-xs); color: var(--vw-muted); margin-top: 5px; line-height: 1.45; font-family: var(--vw-font-body); }
+input[type=text], input[type=email] { width: 100%; background: var(--vw-surface); border: 1px solid var(--vw-border-strong); border-radius: var(--vw-radius-sm); padding: 10px var(--space-3); color: var(--vw-dark); font-family: var(--vw-font-body); font-size: var(--text-base); line-height: 1.5; transition: border-color var(--vw-dur) var(--vw-ease), box-shadow var(--vw-dur); outline: none; min-height: 44px; }
+input[type=text]:focus, input[type=email]:focus { border-color: var(--vw-primary); box-shadow: 0 0 0 3px rgba(255,85,68,0.15); }
+input[type=text].field-valid, input[type=email].field-valid { border-color: var(--vw-success-dark); box-shadow: 0 0 0 3px rgba(58,168,74,0.12); }
+input[type=text].field-invalid, input[type=email].field-invalid { border-color: var(--vw-primary); box-shadow: 0 0 0 3px rgba(255,85,68,0.12); }
+.captcha-row { display: flex; align-items: center; gap: var(--space-3); margin-top: 2px; }
+.captcha-question { font-family: var(--vw-font-body); font-size: var(--text-sm); color: var(--vw-dark); white-space: nowrap; flex-shrink: 0; }
+.captcha-input { width: 80px !important; flex-shrink: 0; text-align: center; font-family: var(--vw-font-body) !important; }
+
+.modal-actions { display: flex; gap: var(--space-2); margin-top: var(--space-5); }
+.btn { padding: var(--space-3) var(--space-5); min-height: 44px; border-radius: var(--vw-radius-sm); border: 1px solid transparent; cursor: pointer; font-family: var(--vw-font-body); font-size: var(--text-base); font-weight: 500; letter-spacing: 0.01em; transition: all 150ms var(--vw-ease); display: flex; align-items: center; justify-content: center; }
+.btn-primary { background: var(--vw-surface-2); color: var(--vw-muted); border-color: var(--vw-border); flex: 1; transition: background 200ms var(--vw-ease), color 200ms var(--vw-ease), border-color 200ms var(--vw-ease); }
+.btn-primary:hover { background: var(--vw-surface-2); }
+.btn-primary.ready { background: var(--vw-primary); color: #fff; border-color: transparent; }
+.btn-primary.ready:hover { background: var(--vw-primary-hover); }
+.btn-primary.ready:active { background: var(--vw-primary-press); transform: translateY(1px); }
+.btn-ghost { background: transparent; color: var(--vw-dark); border-color: var(--vw-border-strong); }
+.btn-ghost:hover { background: var(--vw-surface-2); border-color: var(--vw-dark); }
+
+.modal-close { position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; border-radius: var(--vw-radius-full); border: 1px solid var(--vw-border); background: var(--vw-surface); color: var(--vw-muted-strong); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background var(--vw-dur) var(--vw-ease), color var(--vw-dur) var(--vw-ease), border-color var(--vw-dur); z-index: 10; }
+.modal-close:hover { background: var(--vw-surface-2); color: var(--vw-dark); border-color: var(--vw-border-strong); }
+.modal-title-row { display: flex; align-items: flex-start; padding-right: 40px; margin-bottom: 4px; }
+
+.preview-map-toggle { position: absolute; bottom: 8px; right: 8px; z-index: 1000; display: flex; border: 1px solid var(--vw-border-strong); border-radius: var(--vw-radius-sm); overflow: hidden; box-shadow: var(--vw-shadow-sm); }
+.preview-toggle-btn { padding: 8px var(--space-3); min-height: 36px; font-family: var(--vw-font-body); font-size: var(--text-xs); font-weight: 500; background: rgba(255,255,255,0.92); color: var(--vw-muted-strong); border: none; cursor: pointer; white-space: nowrap; transition: background var(--vw-dur) var(--vw-ease), color var(--vw-dur) var(--vw-ease); }
+.preview-toggle-btn + .preview-toggle-btn { border-left: 1px solid var(--vw-border); }
+.preview-toggle-btn.active { background: var(--vw-dark); color: #fff; }
+.preview-toggle-btn:hover:not(.active) { background: var(--vw-surface-2); color: var(--vw-dark); }
+
+.success-panel { text-align: center; padding: var(--space-6) 0 var(--space-1); }
+.success-panel svg { color: var(--vw-success-dark); margin-bottom: var(--space-3); }
+.success-panel .modal-title { padding-right: 0; }
+.success-panel p { color: var(--vw-muted-strong); font-size: var(--text-sm); line-height: 1.5; }
+.form-error { font-size: var(--text-sm); color: var(--vw-primary); background: var(--vw-primary-tint); border-radius: var(--vw-radius-sm); padding: 10px var(--space-3); margin-bottom: var(--space-4); display: none; }
+.form-error.visible { display: block; }
+
+.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.82); z-index: 5000; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity var(--vw-dur) var(--vw-ease); }
+.lightbox.open { opacity: 1; pointer-events: all; }
+.lightbox img { max-width: 90vw; max-height: 88vh; border-radius: var(--vw-radius-md); box-shadow: var(--vw-shadow-lg); }
+.lightbox-close { position: absolute; top: 18px; right: 22px; background: none; border: none; color: #fff; font-size: 1.75rem; cursor: pointer; opacity: 0.6; line-height: 1; transition: opacity var(--vw-dur); }
+.lightbox-close:hover { opacity: 1; }
+
+/* Detail modal (existing report, read-only) -- ported from velo-melder.html's own detail modal
+   (map strip + badge/address/comment + main-photo-with-thumbnail-strip gallery + footer), same
+   as the submit form, so viewing a Meldung matches exactly. */
+.detail-modal {
+  background: var(--vw-surface);
+  border: 1px solid var(--vw-border);
+  border-top: 4px solid transparent; /* set per-entry to the rating color */
+  border-radius: 0;
+  width: 100%; max-width: 100%; height: 100%; max-height: 100%;
+  margin: 0; box-sizing: border-box; box-shadow: none; overflow: hidden;
+  display: flex; flex-direction: column; position: relative;
+  /* Slower than --vw-dur (180ms, tuned for small UI feedback like button hovers) -- a map
+     resize is a bigger, more spatial motion and reads as smoother/more deliberate at 320ms. */
+  transition: height 320ms var(--vw-ease);
+}
+.detail-modal .modal-close { z-index: 1000; box-shadow: var(--vw-shadow-md); }
+/* Compact by default -- you already clicked a pin to get here, so this is just a "yes, that's
+   the spot" glance, not the primary way to see the location. See #map-expand-toggle below for
+   the pull-down/pull-up affordance to see it full-size. Height is toggled via inline style in
+   JS (toggleDetailMapExpanded()), not a CSS class, because the "full" height depends on the
+   modal's own current rendered height (which varies per report -- more photos, taller modal),
+   not a fixed value; this rule is just the default/collapsed state. */
+.detail-modal-map { position: relative; height: 120px; flex-shrink: 0; border-bottom: 1px solid var(--vw-border); transition: height 320ms var(--vw-ease); }
+#detail-map { width: 100%; height: 100%; }
+/* Leaflet gives every marker cursor:pointer by default (.leaflet-interactive) since markers are
+   normally clickable -- this one has no click handler (it's just showing where the report is),
+   so override it back to a plain cursor rather than implying an interaction that isn't there. */
+#detail-map .leaflet-marker-icon { cursor: default; }
+
+.map-expand-toggle {
+  /* Straddles the map/body boundary (nice "drawer handle" look) while collapsed. When expanded,
+     the body has ~0 height, so that boundary IS the modal's own bottom edge -- straddling it
+     would get half the button clipped by .detail-modal's overflow:hidden, hence the .expanded
+     override below moving it fully inside the map instead. */
+  position: absolute; left: 50%; bottom: 0; transform: translate(-50%, 50%);
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--vw-surface); border: 1px solid var(--vw-border);
+  box-shadow: var(--vw-shadow-md); display: flex; align-items: center; justify-content: center;
+  color: var(--vw-muted-strong); cursor: pointer; z-index: 1000; padding: 0;
+  /* bottom/transform match the map's own 320ms resize duration (below) so the handle finishes
+     repositioning exactly when the map finishes resizing, not before or after it. */
+  transition: background var(--vw-dur) var(--vw-ease), color var(--vw-dur) var(--vw-ease), bottom 320ms var(--vw-ease), transform 320ms var(--vw-ease);
+}
+.map-expand-toggle.expanded { bottom: 10px; transform: translate(-50%, 0); }
+.map-expand-toggle:hover { background: var(--vw-surface-2); color: var(--vw-dark); }
+.map-expand-toggle svg { transition: transform 320ms var(--vw-ease); }
+.map-expand-toggle.expanded svg { transform: rotate(180deg); }
+
+/* Reuses .preview-map-toggle/.preview-toggle-btn's pill styling (already defined below for the
+   submit form's location-preview maps) -- hidden by default, shown only while expanded (see
+   toggleDetailMapExpanded()), since street/satellite switching is pointless chrome on the
+   compact "glance" map. */
+.detail-map-toggle { display: none; }
+.detail-map-toggle.visible { display: flex; }
+.detail-modal-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--space-5) 20px 20px; -webkit-overflow-scrolling: touch; }
+.detail-modal-body .popup-badge { margin-bottom: 10px; }
+/* font-size removed -- it silently overrode .popup-address's own (due to higher specificity)
+   with an off-scale 13px; margin-bottom is the only thing this override actually needs to add. */
+.detail-modal-body .popup-address { margin-bottom: 10px; }
+.detail-modal-body .popup-footer { margin-top: var(--space-5); }
+/* On-scale now (--text-base/--lh-relaxed -- was a hand-picked 15px, then 16px that happened to
+   already match). Slightly bigger than regular body text since this is the one thing a report
+   is actually about -- it should visually lead. */
+.detail-comment { font-size: var(--text-base); line-height: var(--lh-relaxed); color: var(--vw-dark); white-space: pre-wrap; }
+/* A one-liner like "Ampel funktioniert nicht" reads as more of a headline than a paragraph --
+   letting it sit larger (set via JS in openDetailModal(), under 100 characters) makes short
+   reports feel intentional rather than just small, instead of at the same size as a
+   multi-paragraph writeup. On-scale: was 20px (between --text-lg/--text-xl), now --text-xl. */
+.detail-comment.short { font-size: var(--text-xl); line-height: var(--lh-normal); }
+
+/* "Who + when" -- promoted out of the bottom footer (where it had equal weight to the raw
+   lat/lng, of interest to virtually nobody) into a byline read right after the header info,
+   before the report text -- who said this and how recent it is matters for judging a report's
+   credibility/urgency, especially for officials/advocacy groups triaging several of these.
+   On-scale: was 13px (between --text-xs/--text-sm), now --text-sm. */
+.popup-byline { font-size: var(--text-sm); font-weight: 500; color: var(--vw-muted-strong); margin-bottom: var(--space-5); }
+
+.detail-photos { margin-top: var(--space-5); }
+.detail-gallery { display: flex; flex-direction: column; gap: 8px; }
+.detail-photo-main-wrap { min-width: 0; }
+.detail-photo-main { width: 100%; max-height: 260px; object-fit: cover; border-radius: var(--vw-radius-md); border: 1px solid var(--vw-border); display: block; cursor: pointer; }
+.detail-photo-thumbs { display: flex; flex-direction: row; gap: 6px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+.detail-photo-thumbs img { flex: 0 0 auto; width: 56px; height: 56px; object-fit: cover; border-radius: var(--vw-radius-sm); border: 2px solid transparent; cursor: pointer; opacity: 0.7; transition: opacity var(--vw-dur) var(--vw-ease), border-color var(--vw-dur); }
+.detail-photo-thumbs img:hover { opacity: 1; }
+.detail-photo-thumbs img.active { opacity: 1; border-color: var(--vw-primary); }
+
+@media (min-width: 600px) {
+  .detail-modal {
+    width: 600px; max-width: 94vw; height: auto; max-height: 88dvh;
+    border-radius: var(--vw-radius-lg); box-shadow: var(--vw-shadow-lg);
+    transform: translateY(12px); transition: transform var(--vw-dur) var(--vw-ease);
+  }
+  #detail-modal-overlay.open .detail-modal { transform: translateY(0); }
+  .detail-modal-map { height: 130px; }
+  .detail-modal-body { padding: var(--space-5) 28px 24px; }
+  .detail-gallery { flex-direction: row; align-items: flex-start; }
+  .detail-photo-main-wrap { flex: 1 1 auto; }
+  .detail-photo-main { max-height: 320px; }
+  .detail-photo-thumbs { flex-direction: column; overflow-x: visible; overflow-y: auto; padding-bottom: 0; flex: 0 0 76px; max-height: 320px; }
+  .detail-photo-thumbs img { width: 100%; height: 64px; }
+}
+@media (min-width: 900px) {
+  .detail-modal { width: 720px; }
+  .detail-modal-map { height: 140px; }
+  .detail-photo-main { max-height: 380px; }
+  .detail-photo-thumbs { max-height: 380px; }
+}
+
+/* On-scale: was 11px, smaller than the smallest defined step (--text-xs); now --text-xs. */
+.popup-badge { display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-xs); font-family: var(--vw-font-body); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 7px; padding: 2px 8px; border-radius: var(--vw-radius-full); }
+.popup-address { display: flex; align-items: flex-start; gap: 5px; font-size: var(--text-xs); color: var(--vw-muted-strong); line-height: 1.4; margin-bottom: 7px; }
+.popup-address svg { flex-shrink: 0; margin-top: 2px; }
+/* Now holds only the raw coordinates -- "who" moved up to .popup-byline (see above). */
+.popup-footer { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--vw-border); font-family: var(--vw-font-body); }
+/* On-scale: was 10.5px, a fractional value smaller than the smallest defined step; now
+   --text-xs, same as the badge/address above -- monospace + muted color still keep it reading
+   as the least prominent element on the card, just off a real token instead of an arbitrary
+   half-pixel. */
+.popup-footer-coords { font-family: monospace; font-size: var(--text-xs); color: var(--vw-muted); }
+
+.custom-pin { width: 24px; height: 32px; }
+.custom-pin svg { width: 100%; height: 100%; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.22)); }
+
+/* pointer-events:none is load-bearing, not decoration -- opacity:0 alone still leaves this
+   fixed, z-index:3000 box hit-testable even while invisible. On a full-height mobile modal
+   (<600px), it sits right where the expanded map's pull-tab handle ends up (both bottom-center
+   of the viewport), silently swallowing taps meant for the button underneath. Nothing ever
+   needs to click the toast itself, so this is safe unconditionally, .show included. */
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(14px); background: var(--vw-dark); color: #fff; padding: 9px 18px; border-radius: var(--vw-radius-full); font-size: 13px; font-family: var(--vw-font-body); font-weight: 500; z-index: 3000; opacity: 0; pointer-events: none; transition: opacity var(--vw-dur) var(--vw-ease), transform var(--vw-dur) var(--vw-ease); white-space: nowrap; box-shadow: var(--vw-shadow-md); }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo" role="img" aria-label="Velofreundliches Wetzikon">
+    <span class="logo__bar"></span>
+    <span class="logo__text">
+      <span class="logo__top">velofreundliches</span>
+      <span class="logo__bottom">WETZIKON</span>
+    </span>
+  </div>
+  <div class="header-hint">Karte anklicken, um eine Rückmeldung zu einem Punkt abzugeben</div>
+</header>
+
+<div id="map"></div>
+
+<div class="map-toggle">
+  <button id="btn-layer-street" class="active" onclick="setLayer('street', event)">Karte</button>
+  <button id="btn-layer-satellite" onclick="setLayer('satellite', event)">Satellit</button>
+</div>
+
+<!-- Modal -- "Meldung einreichen" form, ported from velo-melder.html (see that file's own copy
+     of this markup) so the form fields and map interaction match exactly. -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-left">
+      <button class="modal-close" onclick="closeModal()" type="button" aria-label="Modal schliessen">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <line x1="1" y1="1" x2="13" y2="13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+          <line x1="13" y1="1" x2="1" y2="13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+        </svg>
+      </button>
+
+      <div id="modal-form-view">
+        <div class="modal-title-row">
+          <h2 class="modal-title" id="modal-title">Meldung einreichen</h2>
+        </div>
+        <div class="modal-coords" id="modal-coords" aria-label="Koordinaten"></div>
+        <div class="address-row">
+          <div class="modal-address" id="modal-address">
+            <span class="address-loading" id="address-loading" style="display:none" aria-live="polite">… Adresse wird geladen</span>
+            <span id="address-text" aria-live="polite"></span>
+          </div>
+        </div>
+
+        <div class="modal-map-inline">
+          <div id="preview-map-mobile"></div>
+          <div class="preview-map-toggle" id="preview-toggle-mobile" aria-hidden="true">
+            <button class="preview-toggle-btn active" onclick="setPreviewLayer('street', event)" type="button">Karte</button>
+            <button class="preview-toggle-btn" onclick="setPreviewLayer('satellite', event)" type="button">Satellit</button>
+          </div>
+          <div class="edit-mode-hint" aria-hidden="true">Karte verschieben, um Standort anzupassen</div>
+          <svg class="preview-crosshair" width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" fill="none" stroke="#ca8a04" stroke-width="2"/>
+            <line x1="12" y1="2" x2="12" y2="8" stroke="#ca8a04" stroke-width="2" stroke-linecap="round"/>
+            <line x1="12" y1="16" x2="12" y2="22" stroke="#ca8a04" stroke-width="2" stroke-linecap="round"/>
+            <line x1="2" y1="12" x2="8" y2="12" stroke="#ca8a04" stroke-width="2" stroke-linecap="round"/>
+            <line x1="16" y1="12" x2="22" y2="12" stroke="#ca8a04" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+
+        <div class="location-edit-bar" id="location-edit-bar">
+          <button class="location-edit-link location-edit-start" onclick="startLocationEdit()" type="button" aria-label="Standort auf der Karte anpassen">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            Standort anpassen
+          </button>
+          <div class="location-edit-actions">
+            <button class="location-edit-link location-edit-link--muted" onclick="discardLocationEdit()" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>
+              Verwerfen
+            </button>
+            <button class="location-edit-link" onclick="saveLocationEdit()" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              Standort speichern
+            </button>
+          </div>
+        </div>
+
+        <fieldset class="rating-fieldset">
+          <legend class="field-label"><span class="required" aria-label="Pflichtfeld">*</span>&nbsp;Bewertung</legend>
+          <div class="rating-scale" id="rating-scale" role="group" aria-label="Bewertung der Velostelle">
+            <button class="rating-btn" data-r="1" onclick="selectRating(1)" aria-pressed="false" type="button"><div class="r-bar"></div><span class="r-label">Gefährlich</span></button>
+            <button class="rating-btn" data-r="2" onclick="selectRating(2)" aria-pressed="false" type="button"><div class="r-bar"></div><span class="r-label">Schlecht</span></button>
+            <button class="rating-btn" data-r="3" onclick="selectRating(3)" aria-pressed="false" type="button"><div class="r-bar"></div><span class="r-label">Akzeptabel</span></button>
+            <button class="rating-btn" data-r="4" onclick="selectRating(4)" aria-pressed="false" type="button"><div class="r-bar"></div><span class="r-label">Gut</span></button>
+            <button class="rating-btn" data-r="5" onclick="selectRating(5)" aria-pressed="false" type="button"><div class="r-bar"></div><span class="r-label">Ausgezeichnet</span></button>
+          </div>
+          <div class="validation-hint" id="hint-type" role="alert">Bitte eine Bewertung auswählen.</div>
+        </fieldset>
+
+        <div class="form-section">
+          <label class="field-label" for="comment-input"><span class="required" aria-label="Pflichtfeld">*</span>&nbsp;Kommentar</label>
+          <textarea id="comment-input" placeholder="Was fällt an diesem Ort auf? Mind. 20 Zeichen." aria-describedby="char-counter hint-comment" aria-required="true"></textarea>
+          <div class="char-counter" id="char-counter" aria-live="polite">0 / 20 Zeichen</div>
+          <div class="validation-hint" id="hint-comment" role="alert">Bitte mind. 20 Zeichen eingeben.</div>
+        </div>
+
+        <div class="form-section">
+          <label class="field-label" for="photo-input">Fotos <span class="field-optional">(optional)</span></label>
+          <div class="upload-area" id="upload-area">
+            <input type="file" id="photo-input" accept="image/*" multiple aria-label="Fotos auswählen" />
+            <div class="upload-hint" aria-hidden="true"><strong>Fotos auswählen</strong> oder hierher ziehen — JPG, PNG, WEBP</div>
+          </div>
+          <div class="photo-previews" id="photo-previews" aria-label="Hochgeladene Fotos"></div>
+        </div>
+
+        <div class="form-section">
+          <label class="field-label" for="name-input">Name <span class="field-optional">(optional)</span></label>
+          <input type="text" id="name-input" placeholder="Name" autocomplete="name" aria-describedby="name-note" />
+          <p class="field-note" id="name-note">Dieser Name wird bei der Meldung angezeigt. Das Feld kann leer bleiben, ein Name gibt deinem Feedback jedoch Gewicht.</p>
+        </div>
+
+        <div class="form-section">
+          <label class="field-label" for="email-input"><span class="required" aria-label="Pflichtfeld">*</span>&nbsp;E-Mail</label>
+          <input type="email" id="email-input" placeholder="name@beispiel.ch" autocomplete="email" inputmode="email" aria-required="true" aria-describedby="hint-email" />
+          <div class="validation-hint" id="hint-email" role="alert">Bitte eine gültige E-Mail-Adresse eingeben.</div>
+          <p class="field-note">Wird nie angezeigt. Deine Meldung wird erst nach Bestätigung durch diese Adresse veröffentlicht.</p>
+        </div>
+
+        <div class="form-section">
+          <label class="field-label" for="captcha-input"><span class="required" aria-label="Pflichtfeld">*</span>&nbsp;Sicherheitsfrage</label>
+          <div class="captcha-row">
+            <span class="captcha-question" id="captcha-question" aria-live="polite"></span>
+            <input type="text" id="captcha-input" class="captcha-input" inputmode="numeric" pattern="[0-9]*" placeholder="?" autocomplete="off" aria-required="true" aria-describedby="hint-captcha" maxlength="3" />
+          </div>
+          <div class="validation-hint" id="hint-captcha" role="alert">Falsche Antwort. Bitte nochmals versuchen.</div>
+        </div>
+
+        <div class="form-error" id="form-error"></div>
+
+        <div class="modal-actions">
+          <button class="btn btn-ghost" onclick="closeModal()" type="button">Abbrechen</button>
+          <button class="btn btn-primary" id="submit-btn" onclick="submitEntry()" type="button">Melden</button>
+        </div>
+      </div>
+
+      <div id="modal-success-view" class="success-panel" style="display:none">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l2.5 2.5L16 9"/></svg>
+        <h2 class="modal-title">Vielen Dank!</h2>
+        <p>Wir haben Ihnen eine E-Mail geschickt. Bitte bestätigen Sie Ihre Meldung über den Link darin — erst danach wird sie geprüft und veröffentlicht.</p>
+        <div class="modal-actions" style="justify-content:center;margin-top:20px;">
+          <button type="button" class="btn btn-primary ready" onclick="closeModal()">Schliessen</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-right" aria-hidden="true">
+      <div id="preview-map-desktop"></div>
+      <div class="preview-map-toggle" id="preview-toggle-desktop">
+        <button class="preview-toggle-btn active" onclick="setPreviewLayer('street', event)" type="button">Karte</button>
+        <button class="preview-toggle-btn" onclick="setPreviewLayer('satellite', event)" type="button">Satellit</button>
+      </div>
+      <div class="edit-mode-hint" aria-hidden="true">Karte verschieben, um Standort anzupassen</div>
+      <div class="map-location-controls">
+        <button class="location-edit-link location-edit-start" onclick="startLocationEdit()" type="button" aria-label="Standort auf der Karte anpassen">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Standort anpassen
+        </button>
+        <div class="location-edit-actions">
+          <button class="location-edit-link location-edit-link--muted" onclick="discardLocationEdit()" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>
+            Verwerfen
+          </button>
+          <button class="location-edit-link" onclick="saveLocationEdit()" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            Standort speichern
+          </button>
+        </div>
+      </div>
+      <svg class="preview-crosshair" width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="12" cy="12" r="4" fill="none" stroke="#ca8a04" stroke-width="2"/>
+        <line x1="12" y1="2" x2="12" y2="8" stroke="#ca8a04" stroke-width="2" stroke-linecap="round"/>
+        <line x1="12" y1="16" x2="12" y2="22" stroke="#ca8a04" stroke-width="2" stroke-linecap="round"/>
+        <line x1="2" y1="12" x2="8" y2="12" stroke="#ca8a04" stroke-width="2" stroke-linecap="round"/>
+        <line x1="16" y1="12" x2="22" y2="12" stroke="#ca8a04" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<!-- Photo upload preview lightbox -- ported from velo-melder.html -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+  <img id="lightbox-img" src="" alt="Foto" onclick="event.stopPropagation()" />
+</div>
+
+<!-- Detail (view existing report) modal -- ported from velo-melder.html's own detail modal:
+     location map strip + badge/address/comment + main-photo-with-thumbnails gallery + footer. -->
+<div class="modal-overlay" id="detail-modal-overlay">
+  <div class="detail-modal" role="dialog" aria-modal="true" aria-labelledby="detail-badge">
+    <button class="modal-close" onclick="closeDetailModal()" type="button" aria-label="Modal schliessen">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <line x1="1" y1="1" x2="13" y2="13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+        <line x1="13" y1="1" x2="1" y2="13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <div class="detail-modal-map">
+      <div id="detail-map"></div>
+      <!-- Only shown while the map is expanded (see toggleDetailMapExpanded()) -- pointless
+           chrome on the compact "glance" map, and Leaflet's own zoom control is added/removed
+           there too rather than living in markup, since it's a Leaflet-generated element. -->
+      <div class="preview-map-toggle detail-map-toggle" id="detail-map-toggle">
+        <button class="preview-toggle-btn active" onclick="setDetailLayer('street', event)" type="button">Karte</button>
+        <button class="preview-toggle-btn" onclick="setDetailLayer('satellite', event)" type="button">Satellit</button>
+      </div>
+      <button class="map-expand-toggle" id="map-expand-toggle" onclick="toggleDetailMapExpanded()" type="button" aria-label="Karte vergrössern">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+    </div>
+    <div class="detail-modal-body">
+      <div class="popup-badge" id="detail-badge"></div>
+      <div class="popup-address" id="detail-address" style="display:none">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+        <span id="detail-address-text"></span>
+      </div>
+      <div class="popup-byline" id="detail-byline"></div>
+      <div class="detail-comment" id="detail-comment"></div>
+      <div class="detail-photos" id="detail-photos" style="display:none">
+        <div class="detail-gallery">
+          <div class="detail-photo-main-wrap">
+            <img class="detail-photo-main" id="detail-photo-main" src="" alt="Foto -- antippen zum Vergrössern" onclick="openLightbox(this.src)" />
+          </div>
+          <div class="detail-photo-thumbs" id="detail-photo-thumbs"></div>
+        </div>
+      </div>
+      <div class="popup-footer">
+        <div class="popup-footer-coords" id="detail-coords"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================================================
+// CONFIG
+// ============================================================================================
+// Relative paths on purpose -- this page must be served from the same origin as the API (no
+// CORS is configured on the backend), so whichever environment serves this file is the API it
+// talks to. See this file's top comment.
+var API_BASE = '';
+var TARGET_ROUTE_TYPE_KEY = 'vorschlag-gelbes-band';
+
+var ROUTE_TYPES = []; // populated from GET /route-types before map init, see bootstrap() below
+var hiddenTypes = new Set(); // never populated here (only one type exists, no toggle UI)
+var isVelonetz = false;
+
+// COMPILE:MAP-ENGINE
+var CARTO_API_KEY = 'cb1_2wxo_1_5095e615a6275239af744999';
+var map, LAYERS, currentLayer = 'street';
+var bandGroup, highlightGroup, drawnItems, decoratorGroup, waypointGroup;
+
+function initMap() {
+  map = L.map('map', { center: [47.3235, 8.7985], zoom: 15 });
+  LAYERS = {
+    street:    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=' + CARTO_API_KEY, { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>', subdomains: 'abcd', maxZoom: 19 }),
+    satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',    { attribution: '&copy; <a href="https://www.esri.com/">Esri</a>', maxZoom: 19 })
+  };
+  LAYERS.street.addTo(map);
+
+  createRoutePanes(map);
+  bandGroup      = L.layerGroup().addTo(map);
+  highlightGroup = L.layerGroup().addTo(map);
+  drawnItems     = new L.FeatureGroup().addTo(map);
+  decoratorGroup = L.layerGroup().addTo(map);
+  waypointGroup  = L.layerGroup().addTo(map);
+  map.on('zoomend', function() { rebuildDecorators(); });
+
+  var toggleEl = document.querySelector('.map-toggle');
+  if (toggleEl) { L.DomEvent.disableClickPropagation(toggleEl); L.DomEvent.disableScrollPropagation(toggleEl); }
+  setTimeout(function() {
+    var zoomEl = document.querySelector('.leaflet-control-zoom');
+    if (zoomEl) { L.DomEvent.disableClickPropagation(zoomEl); }
+  }, 0);
+
+  // Click anywhere on the map opens the feedback form for that point -- same interaction as
+  // velo-melder.html's default mode.
+  map.on('click', function(e) { pendingLatLng = e.latlng; openModal(e.latlng); });
+}
+
+function setLayer(name, evt) {
+  if (evt) { evt.stopPropagation(); }
+  if (name === currentLayer) return;
+  map.removeLayer(LAYERS[currentLayer]);
+  LAYERS[name].addTo(map);
+  currentLayer = name;
+  document.getElementById('btn-layer-street').classList.toggle('active', name === 'street');
+  document.getElementById('btn-layer-satellite').classList.toggle('active', name === 'satellite');
+}
+// /COMPILE:MAP-ENGINE
+
+// COMPILE:ROUTE-RENDER
+function getTypeCfg(key) {
+  return ROUTE_TYPES.filter(function(t) { return t.key === key; })[0] || ROUTE_TYPES[0];
+}
+
+// Shared by the main map and every mini map (submit-form preview + detail modal) so overlapping
+// segments look identical everywhere: each route type gets its own pane with a fixed CSS opacity,
+// while every polyline drawn into that pane uses opacity:1. That way overlapping strokes within
+// the same pane are composited once (at the pane level), not stacked and re-blended stroke over
+// stroke -- which is what made overlaps render darker in the mini maps before this was shared.
+function createRoutePanes(targetMap) {
+  ROUTE_TYPES.forEach(function(cfg, i) {
+    var p = targetMap.createPane('rt-' + cfg.key);
+    p.style.zIndex = 390 + i;
+    p.style.opacity = cfg.band
+      ? (cfg.bandStyle === 'outlined' ? 0.85 : cfg.bandStyle === 'narrow' ? 0.75 : 0.65)
+      : (cfg.opacity || 0.9);
+  });
+}
+
+function layerStyle(key) {
+  var c = getTypeCfg(key);
+  return { color: c.color, weight: c.weight, opacity: 1, lineCap: 'round', lineJoin: 'round', dashArray: c.dashArray || null, pane: 'rt-' + key };
+}
+
+function flattenLatLngs(lls) {
+  if (!lls || !lls.length) return [];
+  return (lls[0] instanceof L.LatLng) ? lls : (lls[0] || []);
+}
+
+function smoothCoords(coords, iterations) {
+  var pts = coords.slice();
+  for (var i = 0; i < (iterations || 3); i++) {
+    var next = [pts[0]];
+    for (var j = 0; j < pts.length - 1; j++) {
+      var a = pts[j], b = pts[j + 1];
+      next.push([0.75*a[0] + 0.25*b[0], 0.75*a[1] + 0.25*b[1]]);
+      next.push([0.25*a[0] + 0.75*b[0], 0.25*a[1] + 0.75*b[1]]);
+    }
+    next.push(pts[pts.length - 1]);
+    pts = next;
+  }
+  return pts;
+}
+
+function renderGeoJSON(geojson, smooth, hideBand) {
+  drawnItems.clearLayers();
+  if (!geojson || !geojson.features || !geojson.features.length) return;
+  var featureIdx = 0;
+  L.geoJSON(geojson, {
+    style: function(f) { return layerStyle(f.properties && f.properties.type); },
+    onEachFeature: function(f, layer) {
+      layer.routeType = (f.properties && f.properties.type) || TARGET_ROUTE_TYPE_KEY;
+      // GET /routes returns every route type; this view only has a pane for
+      // vorschlag-gelbes-band (see ROUTE_TYPES above), so skip everything else.
+      if (!ROUTE_TYPES.some(function(t) { return t.key === layer.routeType; })) return;
+      layer.routeDirection = (f.properties && f.properties.direction) || 'one-way';
+      layer.featureIndex   = featureIdx++;
+      if (hideBand && getTypeCfg(layer.routeType).band) {
+        layer.setStyle({ opacity: 0, weight: 0 });
+      }
+      if (smooth && f.geometry && f.geometry.type === 'LineString' && f.geometry.coordinates.length > 2) {
+        var sc = smoothCoords(f.geometry.coordinates);
+        layer.setLatLngs(sc.map(function(c) { return [c[1], c[0]]; }));
+      }
+      drawnItems.addLayer(layer);
+    }
+  });
+}
+
+function bandWeight(targetMap) {
+  var mpp = 40075016.686 * Math.cos(47.32 * Math.PI / 180) / Math.pow(2, (targetMap || map).getZoom() + 8);
+  return Math.max(6, Math.round(10 / mpp));
+}
+
+function rebuildDecorators() {
+  decoratorGroup.clearLayers();
+  bandGroup.clearLayers();
+  if (typeof L.polylineDecorator === 'undefined') return;
+  drawnItems.eachLayer(function(layer) {
+    if (!layer.getLatLngs) return;
+    var typeKey = layer.routeType || TARGET_ROUTE_TYPE_KEY;
+    var cfg = getTypeCfg(typeKey);
+    var lls = flattenLatLngs(layer.getLatLngs());
+    if (lls.length < 2) return;
+    if (hiddenTypes.has(typeKey)) return;
+    var isBand = !!cfg.band;
+
+    if (isBand) {
+      var bw = bandWeight();
+      if (cfg.bandStyle === 'outlined') {
+        L.polyline(lls, { color: cfg.color, weight: bw, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false, pane: 'rt-' + typeKey }).addTo(bandGroup);
+        L.polyline(lls, { color: '#ffffff', weight: Math.max(4, bw - 6), opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false, pane: 'rt-' + typeKey }).addTo(bandGroup);
+      } else if (cfg.bandStyle === 'narrow') {
+        L.polyline(lls, { color: cfg.color, weight: Math.max(3, Math.round(bw / 3)), opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false, pane: 'rt-' + typeKey }).addTo(bandGroup);
+      } else {
+        var sw = cfg.bandScale ? Math.max(3, Math.round(bw * cfg.bandScale)) : bw;
+        L.polyline(lls, { color: cfg.color, weight: sw, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false, pane: 'rt-' + typeKey }).addTo(bandGroup);
+      }
+      return;
+    }
+    if (cfg.noDirection) return;
+
+    var dir = layer.routeDirection || 'one-way';
+    function arrow() {
+      return L.Symbol.arrowHead({ pixelSize: 10, headAngle: 55, polygon: false, pathOptions: { color: cfg.color, weight: 2, opacity: 0.9, fill: false } });
+    }
+    if (dir === 'one-way') {
+      L.polylineDecorator(layer, { patterns: [{ offset: '10%', repeat: '25%', symbol: arrow() }] }).addTo(decoratorGroup);
+    } else {
+      L.polylineDecorator(layer, { patterns: [{ offset: '5%', repeat: '30%', symbol: arrow() }] }).addTo(decoratorGroup);
+      L.polylineDecorator(L.polyline(lls.slice().reverse()), { patterns: [{ offset: '20%', repeat: '30%', symbol: arrow() }] }).addTo(decoratorGroup);
+    }
+  });
+}
+
+// Renders the currently-visible routes into a mini layer group at the given zoom -- used by the
+// modal's location-preview maps so the yellow band shows up there too, not just the main map.
+function renderMiniRoutes(miniLayerGroup) {
+  miniLayerGroup.clearLayers();
+  var bw = bandWeight();
+  drawnItems.eachLayer(function(layer) {
+    if (!layer.getLatLngs) return;
+    var typeKey = layer.routeType || TARGET_ROUTE_TYPE_KEY;
+    if (hiddenTypes.has(typeKey)) return;
+    var lls = flattenLatLngs(layer.getLatLngs());
+    if (lls.length < 2) return;
+    var cfg = getTypeCfg(typeKey);
+    var pane = 'rt-' + typeKey;
+    // opacity:1 on every stroke here, same as the main map's bandGroup/drawnItems -- the actual
+    // translucency comes from the pane itself (see createRoutePanes), so overlaps composite once
+    // instead of darkening stroke over stroke.
+    if (cfg.band) {
+      if (cfg.bandStyle === 'outlined') {
+        L.polyline(lls, { color: cfg.color, weight: bw, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false, pane: pane }).addTo(miniLayerGroup);
+        L.polyline(lls, { color: '#ffffff', weight: Math.max(4, bw - 6), opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false, pane: pane }).addTo(miniLayerGroup);
+      } else if (cfg.bandStyle === 'narrow') {
+        L.polyline(lls, { color: cfg.color, weight: Math.max(3, Math.round(bw / 3)), opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false, pane: pane }).addTo(miniLayerGroup);
+      } else {
+        var sw = cfg.bandScale ? Math.max(3, Math.round(bw * cfg.bandScale)) : bw;
+        L.polyline(lls, { color: cfg.color, weight: sw, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false, pane: pane }).addTo(miniLayerGroup);
+      }
+    } else {
+      L.polyline(lls, { color: cfg.color, weight: cfg.weight, opacity: 1, lineCap: 'round', lineJoin: 'round', dashArray: cfg.dashArray || null, interactive: false, pane: pane }).addTo(miniLayerGroup);
+    }
+  });
+}
+// /COMPILE:ROUTE-RENDER
+
+function loadScript(url, cb) {
+  var s = document.createElement('script');
+  s.src = url; s.onload = cb;
+  document.head.appendChild(s);
+}
+
+// ============================================================================================
+// Existing reports (pins) -- GET /reports, read-only. Server has no way to scope reports to a
+// specific route (reports are freestanding lat/lng, not linked to route features), so this shows
+// every published report -- in practice, only ones near the visible gelbes-Band map area matter.
+// ============================================================================================
+var RATINGS = {
+  1: { label: 'Gefährlich',   color: '#b91c1c', bg: 'rgba(185,28,28,0.12)' },
+  2: { label: 'Schlecht',     color: '#ea580c', bg: 'rgba(234,88,12,0.12)' },
+  3: { label: 'Akzeptabel',   color: '#ca8a04', bg: 'rgba(202,138,4,0.12)' },
+  4: { label: 'Gut',          color: '#65a30d', bg: 'rgba(101,163,13,0.12)' },
+  5: { label: 'Ausgezeichnet',color: '#15803d', bg: 'rgba(21,128,61,0.12)' }
+};
+
+function makeIcon(rating) {
+  var cfg = RATINGS[rating];
+  var svg = '<svg viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">'
+    + '<path d="M12 0C5.37 0 0 5.37 0 12c0 8.5 12 20 12 20S24 20.5 24 12C24 5.37 18.63 0 12 0z" fill="' + cfg.color + '"/>'
+    + '<circle cx="12" cy="12" r="5" fill="rgba(255,255,255,0.35)"/>'
+    + '</svg>';
+  return L.divIcon({ html: '<div class="custom-pin">' + svg + '</div>', iconSize: [24, 32], iconAnchor: [12, 32], popupAnchor: [0, -34], className: '' });
+}
+
+function addReportMarker(entry) {
+  var marker = L.marker([entry.lat, entry.lng], { icon: makeIcon(entry.rating) });
+  marker.on('click', function(e) { L.DomEvent.stopPropagation(e); openDetailModal(entry); });
+  marker.addTo(waypointGroup);
+}
+
+// DETAIL MODAL -- opened by clicking a pin; shows the full Meldung with a location map strip
+// (real-world-scale, independent of the main map's zoom), a main photo + thumbnail strip
+// gallery, and a footer -- ported from velo-melder.html's own detail modal verbatim.
+var MONTHS_DE = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+// Date only, no time -- the API's createdAt still carries the full timestamp (see
+// ReportPresenter::toPublicArray()), this just isn't the place to show it down to the minute.
+function formatEntryDate(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.getDate() + '. ' + MONTHS_DE[d.getMonth()] + ' ' + d.getFullYear();
+}
+
+var detailMap = null;
+var detailMarker = null;
+var detailRouteLayer = null;
+var detailTileLayer = null;
+var currentDetailLayer = 'street';
+var detailZoomControl = null; // created lazily on first expand, see toggleDetailMapExpanded()
+var DETAIL_MAP_METERS_WIDE = 500; // fixed real-world scale, independent of the main map's zoom
+
+// Zoom level at which `metersWide` meters span the container's pixel width, at this latitude
+// (Web Mercator ground resolution: metersPerPixel = 156543.03392 * cos(lat) / 2^zoom).
+function zoomForMetersWide(lat, widthPx, metersWide) {
+  var metersPerPixel = metersWide / widthPx;
+  return Math.log2(156543.03392 * Math.cos(lat * Math.PI / 180) / metersPerPixel);
+}
+
+function initDetailMap(entry) {
+  var latlng = [entry.lat, entry.lng];
+  var widthPx = document.getElementById('detail-map').clientWidth || 320;
+  var zoom = zoomForMetersWide(entry.lat, widthPx, DETAIL_MAP_METERS_WIDE);
+  if (!detailMap) {
+    // zoomSnap:0 only for this initial view -- with the default snap (1), Leaflet would round
+    // the precisely-computed "exactly 500m wide" zoom to the nearest whole level, undoing the
+    // real-world-scale framing zoomForMetersWide() just calculated. Restored to 1 right after
+    // (below) so interactive zoom (scroll-wheel/pinch/double-click) still moves in the same
+    // whole-level steps per tick as the main map -- Leaflet reads options.zoomSnap fresh on
+    // every zoom interaction, not just at construction, so this retroactively speeds up
+    // scrolling without touching the already-rendered initial zoom level.
+    detailMap = L.map('detail-map', Object.assign({ center: latlng, zoom: zoom, zoomSnap: 0 }, MAP_OPTS));
+    detailMap.options.zoomSnap = 1;
+    createRoutePanes(detailMap);
+    detailTileLayer = L.tileLayer(TILE_URLS.street, { maxZoom: 19 }).addTo(detailMap);
+    detailRouteLayer = L.layerGroup().addTo(detailMap);
+    detailMarker = L.marker(latlng, { icon: makeIcon(entry.rating) }).addTo(detailMap);
+  } else {
+    detailMap.setView(latlng, zoom);
+    detailMarker.setLatLng(latlng).setIcon(makeIcon(entry.rating));
+  }
+  renderMiniRoutes(detailRouteLayer);
+  setTimeout(function() { detailMap.invalidateSize(); }, 80);
+}
+
+function selectDetailPhoto(url, thumbEl) {
+  document.getElementById('detail-photo-main').src = url;
+  document.querySelectorAll('#detail-photo-thumbs img').forEach(function(t) { t.classList.remove('active'); });
+  if (thumbEl) thumbEl.classList.add('active');
+}
+
+function openDetailModal(entry) {
+  var cfg = RATINGS[entry.rating];
+  document.querySelector('.detail-modal').style.borderTopColor = cfg.color;
+  var badge = document.getElementById('detail-badge');
+  badge.textContent = cfg.label;
+  badge.style.background = cfg.bg;
+  badge.style.color = cfg.color;
+
+  var addressLabel = formatAddressLabel(entry.address, entry.addressDistanceM);
+  var addressEl = document.getElementById('detail-address');
+  if (addressLabel) {
+    document.getElementById('detail-address-text').textContent = addressLabel;
+    addressEl.style.display = 'flex';
+  } else {
+    addressEl.style.display = 'none';
+  }
+
+  // Byline (who + when) -- read right before the report text, like a forum post's author/date
+  // line, since it's context for judging the report, not an afterthought (see .popup-byline).
+  // "E-Mail verifiziert" is always true here, not just a guess -- GET /reports only ever
+  // returns published reports, and a report can't reach "published" without first going
+  // through ReportSubmissionService::confirmEmail() (clicking the emailed confirmation link)
+  // and then admin approval. No API field needed for this, it's an invariant of what's public.
+  var who = entry.anonymous || !entry.name ? 'Anonym (E-Mail verifiziert)' : entry.name;
+  var when = formatEntryDate(entry.createdAt);
+  document.getElementById('detail-byline').textContent = who + (when ? ' · ' + when : '');
+
+  var commentEl = document.getElementById('detail-comment');
+  commentEl.textContent = entry.comment;
+  commentEl.classList.toggle('short', (entry.comment || '').length < 100);
+
+  var photosEl = document.getElementById('detail-photos');
+  var thumbsEl = document.getElementById('detail-photo-thumbs');
+  thumbsEl.innerHTML = '';
+  if (entry.photos && entry.photos.length) {
+    photosEl.style.display = 'block';
+    document.getElementById('detail-photo-main').src = entry.photos[0];
+    if (entry.photos.length > 1) {
+      thumbsEl.style.display = 'flex';
+      entry.photos.forEach(function(url, i) {
+        var img = document.createElement('img');
+        img.src = url;
+        img.alt = 'Foto ' + (i + 1);
+        if (i === 0) img.className = 'active';
+        img.addEventListener('click', function() { selectDetailPhoto(url, img); });
+        thumbsEl.appendChild(img);
+      });
+    } else {
+      thumbsEl.style.display = 'none';
+    }
+  } else {
+    photosEl.style.display = 'none';
+  }
+
+  document.getElementById('detail-coords').textContent = entry.lat.toFixed(5) + ', ' + entry.lng.toFixed(5);
+
+  resetDetailMapExpanded(); // every Meldung starts with the compact map, not however the last one was left
+  document.getElementById('detail-modal-overlay').classList.add('open');
+  setTimeout(function() { initDetailMap(entry); }, 60);
+}
+
+function closeDetailModal() {
+  document.getElementById('detail-modal-overlay').classList.remove('open');
+  resetDetailMapExpanded();
+}
+document.getElementById('detail-modal-overlay').addEventListener('click', function(e) { if (e.target === this) closeDetailModal(); });
+
+// PULL-DOWN/PULL-UP: the compact map strip is just a "yes, that's the spot" glance (you already
+// clicked a pin to get here) -- this toggle grows it to fill the modal so you can actually look
+// around, then shrinks it back. The modal's own height is locked (via inline style, read from
+// its current rendered size) before growing the map, so the dialog itself doesn't resize --
+// only the space inside it gets redistributed from the text content to the map.
+var detailMapExpanded = false;
+
+function resetDetailMapExpanded() {
+  detailMapExpanded = false;
+  document.querySelector('.detail-modal').style.height = '';
+  document.querySelector('.detail-modal-map').style.height = '';
+  document.getElementById('map-expand-toggle').classList.remove('expanded');
+  document.getElementById('map-expand-toggle').setAttribute('aria-label', 'Karte vergrössern');
+  document.getElementById('detail-map-toggle').classList.remove('visible');
+  if (detailZoomControl) detailZoomControl.remove();
+  // Every Meldung starts on the street layer, same as the compact map always shows -- switching
+  // to satellite while expanded shouldn't carry over to the next report you look at.
+  if (currentDetailLayer !== 'street') { setDetailLayer('street'); }
+}
+
+function setDetailLayer(name, evt) {
+  if (evt) { evt.stopPropagation(); }
+  if (name === currentDetailLayer) return;
+  currentDetailLayer = name;
+  detailMap.removeLayer(detailTileLayer);
+  detailTileLayer = L.tileLayer(TILE_URLS[name], { maxZoom: 19 }).addTo(detailMap);
+  document.querySelectorAll('#detail-map-toggle .preview-toggle-btn').forEach(function(btn) {
+    btn.classList.toggle('active', btn.textContent.trim() === (name === 'street' ? 'Karte' : 'Satellit'));
+  });
+}
+
+function toggleDetailMapExpanded() {
+  var modalEl = document.querySelector('.detail-modal');
+  var mapEl = document.querySelector('.detail-modal-map');
+  var btn = document.getElementById('map-expand-toggle');
+  detailMapExpanded = !detailMapExpanded;
+
+  if (detailMapExpanded) {
+    var modalHeight = modalEl.getBoundingClientRect().height;
+    modalEl.style.height = modalHeight + 'px';
+    mapEl.style.height = (modalHeight - 1) + 'px'; // -1: the map strip's own 1px bottom border
+  } else {
+    modalEl.style.height = '';
+    mapEl.style.height = '';
+  }
+  btn.classList.toggle('expanded', detailMapExpanded);
+  btn.setAttribute('aria-label', detailMapExpanded ? 'Karte verkleinern' : 'Karte vergrössern');
+
+  // Street/satellite toggle and Leaflet's own zoom control are only useful once there's enough
+  // room to actually look around -- pointless chrome on the compact "glance" map, so both only
+  // exist while expanded. The zoom control is created once and re-added/removed rather than
+  // recreated each time (removing and re-adding a fresh L.control.zoom every toggle would work
+  // too, but leaks nothing either way -- reuse is just simpler).
+  document.getElementById('detail-map-toggle').classList.toggle('visible', detailMapExpanded);
+  if (detailMapExpanded) {
+    if (!detailZoomControl) { detailZoomControl = L.control.zoom(); }
+    detailZoomControl.addTo(detailMap);
+  } else if (detailZoomControl) {
+    detailZoomControl.remove();
+  }
+
+  // Leaflet doesn't find out its container resized on its own -- but rather than a fixed
+  // setTimeout (which either fires too early, leaving stale/cropped tiles for a moment, or too
+  // late, leaving a dead pause before the pin jumps), this listens for the CSS height
+  // transition to actually finish, then re-centers with an animated pan so the pin visibly
+  // glides to the middle of the resized map instead of snapping there -- see the
+  // 'transitionend' listener below (added once, not per call).
+}
+
+// Fires once per completed .detail-modal-map height transition (both the expand and the
+// collapse direction) -- animate:true makes invalidateSize() smoothly pan to the recentered
+// view (Leaflet's own panBy animation) instead of an instant snap, which is what makes the pin
+// visibly glide into the middle of the resized map rather than jumping there.
+document.querySelector('.detail-modal-map').addEventListener('transitionend', function(e) {
+  if (e.propertyName !== 'height' || !detailMap) return;
+  detailMap.invalidateSize({ animate: true, pan: true });
+});
+
+// ============================================================================================
+// "Meldung einreichen" form -- ported from velo-melder.html (preview maps, location-edit-drag,
+// reverse geocoding, validation, photo upload, captcha) verbatim where possible. The only real
+// departure: submitEntry() at the bottom actually POSTs to the backend (that file has none).
+// ============================================================================================
+var pendingLatLng = null;
+var selectedRating = null;
+var pendingPhotos = []; // [{id, dataUrl, file}]
+var challengeToken = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
+
+// Shown before any Bewertung is picked -- comment isn't gated on rating being selected first, so
+// this covers that state. Once a rating is chosen, selectRating() below swaps in one of these
+// instead: each asks for the specific detail that rating needs to be actually useful to both
+// other cyclists and the officials who triage these reports, rather than one generic prompt.
+var COMMENT_PLACEHOLDER_DEFAULT = 'Was fällt an diesem Ort auf? Mind. 20 Zeichen.';
+var COMMENT_PLACEHOLDERS = {
+  1: 'Was ist an diesem Ort besonders gefährlich? Beschreibe es, damit es auch für andere klar ist. Hast du einen Vorschlag, wie man die Situation entschärfen könnte?',
+  2: 'Was macht diese Stelle für den Veloverkehr unangenehm oder unsicher? Beschreibe konkret, was stört – und was würde es besser machen?',
+  3: 'Was funktioniert hier einigermassen, und was könnte noch verbessert werden? Je konkreter, desto besser können wir die Stelle einordnen.',
+  4: 'Was gefällt dir an dieser Stelle? Was sollte unbedingt so bleiben – und gibt es trotzdem noch Raum für kleine Verbesserungen?',
+  5: 'Was macht diesen Ort zu einem Vorzeigebeispiel für sicheren Veloverkehr? Deine Beschreibung hilft, gute Lösungen auch anderswo umzusetzen.'
+};
+
+// PREVIEW MAPS (mobile inline + desktop right column)
+var previewMapMobile = null;
+var previewMapDesktop = null;
+var previewLayerMobile = null;
+var previewLayerDesktop = null;
+var currentPreviewLayer = 'street';
+var TILE_URLS = {
+  street:    'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=' + CARTO_API_KEY,
+  satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+};
+// dragging stays false (no panning -- the point of these mini maps is a fixed location, not
+// free navigation), but zoom is allowed via scroll-wheel/pinch/double-click, all set to
+// 'center' rather than true -- Leaflet then always zooms around the map's current center,
+// ignoring where the cursor/pinch/double-click actually was, so the center point can never
+// drift even while zooming. boxZoom/keyboard stay off (shift-drag and arrow-key panning would
+// both move the center too).
+var MAP_OPTS = { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: 'center', touchZoom: 'center', doubleClickZoom: 'center', boxZoom: false, keyboard: false };
+var previewRouteLayerDesktop = null;
+var previewRouteLayerMobile  = null;
+
+function initPreviewMap(latlng) {
+  var isDesktop = window.matchMedia('(min-width: 900px)').matches;
+  if (isDesktop) {
+    if (!previewMapDesktop) {
+      previewMapDesktop = L.map('preview-map-desktop', Object.assign({ center: latlng, zoom: map.getZoom() }, MAP_OPTS));
+      createRoutePanes(previewMapDesktop);
+      previewLayerDesktop = L.tileLayer(TILE_URLS[currentPreviewLayer], { maxZoom: 19 }).addTo(previewMapDesktop);
+      previewRouteLayerDesktop = L.layerGroup().addTo(previewMapDesktop);
+      L.DomEvent.disableClickPropagation(document.getElementById('preview-map-desktop').parentElement);
+    } else { previewMapDesktop.setView(latlng, map.getZoom()); }
+    renderMiniRoutes(previewRouteLayerDesktop);
+    setTimeout(function() { previewMapDesktop.invalidateSize(); }, 80);
+  } else {
+    if (!previewMapMobile) {
+      previewMapMobile = L.map('preview-map-mobile', Object.assign({ center: latlng, zoom: map.getZoom() }, MAP_OPTS));
+      createRoutePanes(previewMapMobile);
+      previewLayerMobile = L.tileLayer(TILE_URLS[currentPreviewLayer], { maxZoom: 19 }).addTo(previewMapMobile);
+      previewRouteLayerMobile = L.layerGroup().addTo(previewMapMobile);
+      L.DomEvent.disableClickPropagation(document.getElementById('preview-map-mobile').parentElement);
+    } else { previewMapMobile.setView(latlng, map.getZoom()); }
+    renderMiniRoutes(previewRouteLayerMobile);
+    setTimeout(function() { previewMapMobile.invalidateSize(); }, 80);
+  }
+}
+
+function setPreviewLayer(name, evt) {
+  if (evt) { evt.stopPropagation(); }
+  if (name === currentPreviewLayer) return;
+  currentPreviewLayer = name;
+  if (previewMapMobile && previewLayerMobile) {
+    previewMapMobile.removeLayer(previewLayerMobile);
+    previewLayerMobile = L.tileLayer(TILE_URLS[name], { maxZoom: 19 }).addTo(previewMapMobile);
+  }
+  if (previewMapDesktop && previewLayerDesktop) {
+    previewMapDesktop.removeLayer(previewLayerDesktop);
+    previewLayerDesktop = L.tileLayer(TILE_URLS[name], { maxZoom: 19 }).addTo(previewMapDesktop);
+  }
+  document.querySelectorAll('.preview-toggle-btn').forEach(function(btn) {
+    btn.classList.toggle('active', btn.textContent.trim() === (name === 'street' ? 'Karte' : 'Satellit'));
+  });
+}
+
+function distanceMeters(lat1, lng1, lat2, lng2) {
+  var R = 6371000;
+  var toRad = function(d) { return d * Math.PI / 180; };
+  var dLat = toRad(lat2 - lat1);
+  var dLng = toRad(lng2 - lng1);
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatAddressLabel(address, distanceM) {
+  if (!address || distanceM == null) return null;
+  if (distanceM <= 20) return address;
+  if (distanceM <= 50) return 'In der Nähe von ' + address;
+  return null;
+}
+
+var lastGeocodedAddress   = null;
+var lastGeocodedDistanceM = null;
+
+function reverseGeocode(latlng) {
+  var url = 'https://photon.komoot.io/reverse?lon=' + latlng.lng + '&lat=' + latlng.lat + '&lang=de';
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var feat = data.features && data.features[0];
+      var rawAddress = null, distanceM = null;
+      if (feat) {
+        var p = feat.properties || {};
+        var parts = [];
+        var road = p.street || p.name || '';
+        var hn   = p.housenumber || '';
+        var city = p.city || p.town || p.village || p.locality || '';
+        if (road) parts.push(road + (hn ? ' ' + hn : ''));
+        if (city) parts.push(city);
+        if (parts.length) rawAddress = parts.join(', ');
+        else if (p.name) rawAddress = p.name;
+        var coords = feat.geometry && feat.geometry.coordinates;
+        if (coords) distanceM = distanceMeters(latlng.lat, latlng.lng, coords[1], coords[0]);
+      }
+      lastGeocodedAddress   = rawAddress;
+      lastGeocodedDistanceM = distanceM;
+      var label = formatAddressLabel(rawAddress, distanceM);
+      document.getElementById('address-text').textContent =
+        label || (rawAddress ? 'Kein Strassenname in der Nähe' : 'Adresse unbekannt');
+      document.getElementById('address-loading').style.display = 'none';
+    })
+    .catch(function() {
+      lastGeocodedAddress = null; lastGeocodedDistanceM = null;
+      document.getElementById('address-text').textContent = 'Adresse konnte nicht geladen werden';
+      document.getElementById('address-loading').style.display = 'none';
+    });
+}
+
+function openModal(latlng) {
+  document.getElementById('modal-form-view').style.display = '';
+  document.getElementById('modal-success-view').style.display = 'none';
+  document.getElementById('form-error').classList.remove('visible');
+
+  selectedRating = null; pendingPhotos = [];
+  document.querySelectorAll('.rating-btn').forEach(function(b) { b.classList.remove('selected'); });
+  document.getElementById('comment-input').value = '';
+  document.getElementById('comment-input').placeholder = COMMENT_PLACEHOLDER_DEFAULT;
+  document.getElementById('comment-input').classList.remove('field-valid', 'field-invalid');
+  document.getElementById('rating-scale').classList.remove('field-invalid');
+  commentTouched = false;
+  emailTouched   = false;
+  document.getElementById('name-input').value = '';
+  document.getElementById('email-input').value = '';
+  document.getElementById('email-input').classList.remove('field-valid', 'field-invalid');
+  document.getElementById('hint-email').classList.remove('visible');
+  document.getElementById('char-counter').textContent = '0 / 20 Zeichen';
+  document.getElementById('char-counter').className = 'char-counter';
+  generateCaptcha();
+  document.getElementById('hint-type').classList.remove('visible');
+  document.getElementById('hint-comment').classList.remove('visible');
+  document.getElementById('photo-input').value = '';
+  document.getElementById('photo-previews').innerHTML = '';
+  document.getElementById('modal-coords').textContent = latlng.lat.toFixed(5) + ', ' + latlng.lng.toFixed(5);
+  document.getElementById('address-text').textContent = '';
+  document.getElementById('address-loading').style.display = 'inline';
+  reverseGeocode(latlng);
+  document.getElementById('modal-overlay').classList.add('open');
+  setTimeout(function() { initPreviewMap(latlng); }, 60);
+}
+
+function closeModal() {
+  if (editMode) discardLocationEdit();
+  document.getElementById('modal-overlay').classList.remove('open');
+  pendingLatLng = null; selectedRating = null; pendingPhotos = [];
+  currentPreviewLayer = 'street';
+}
+document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+
+function selectRating(r) {
+  selectedRating = r;
+  document.querySelectorAll('.rating-btn').forEach(function(b) { b.classList.remove('selected'); });
+  document.querySelector('.rating-btn[data-r="' + r + '"]').classList.add('selected');
+  document.getElementById('hint-type').classList.remove('visible');
+  document.getElementById('rating-scale').classList.remove('field-invalid');
+  document.getElementById('comment-input').placeholder = COMMENT_PLACEHOLDERS[r] || COMMENT_PLACEHOLDER_DEFAULT;
+  validateForm();
+}
+
+// LOCATION EDIT MODE (drag the preview map to move the pin before submitting)
+var editMode = false;
+var editTempLatLng = null;
+var editOriginalLatLng = null;
+var editHintTimer = null;
+
+function showEditHint() { document.querySelectorAll('.edit-mode-hint').forEach(function(el) { el.classList.remove('hint-hidden'); }); }
+function hideEditHint() { document.querySelectorAll('.edit-mode-hint').forEach(function(el) { el.classList.add('hint-hidden'); }); }
+
+function startLocationEdit() {
+  editMode = true;
+  editTempLatLng = null;
+  editOriginalLatLng = pendingLatLng ? L.latLng(pendingLatLng.lat, pendingLatLng.lng) : null;
+
+  showEditHint();
+  clearTimeout(editHintTimer);
+  editHintTimer = setTimeout(hideEditHint, 10000);
+
+  [previewMapMobile, previewMapDesktop].forEach(function(m) {
+    if (!m) return;
+    m.dragging.enable();
+    m.scrollWheelZoom.enable();
+    m.on('moveend', onPreviewMoveEnd);
+    m.once('movestart', hideEditHint);
+  });
+  var activeMap = getActivePreviewMap();
+  if (activeMap) editTempLatLng = getCrosshairLatLng(activeMap);
+
+  document.querySelector('.modal-map-inline') && document.querySelector('.modal-map-inline').classList.add('edit-mode');
+  document.querySelector('.modal-right')       && document.querySelector('.modal-right').classList.add('edit-mode');
+  document.querySelectorAll('.preview-crosshair circle').forEach(function(c) { c.classList.add('edit-pulse'); });
+
+  document.querySelectorAll('.location-edit-start').forEach(function(el) { el.style.display = 'none'; });
+  document.querySelectorAll('.location-edit-actions').forEach(function(el) { el.classList.add('visible'); });
+}
+
+function getActivePreviewMap() {
+  return window.matchMedia('(min-width: 900px)').matches ? previewMapDesktop : previewMapMobile;
+}
+
+function getCrosshairLatLng(m) {
+  var activeMap = getActivePreviewMap() || m;
+  activeMap.invalidateSize({ animate: false });
+  var rect = activeMap.getContainer().getBoundingClientRect();
+  var centerPoint = L.point(rect.width / 2, rect.height / 2);
+  return activeMap.containerPointToLatLng(centerPoint);
+}
+
+function onPreviewMoveEnd(e) {
+  if (!editMode) return;
+  var latlng = getCrosshairLatLng(e.target);
+  editTempLatLng = L.latLng(latlng.lat, latlng.lng);
+  document.getElementById('modal-coords').textContent = latlng.lat.toFixed(5) + ', ' + latlng.lng.toFixed(5);
+  document.getElementById('address-loading').style.display = 'inline';
+  document.getElementById('address-text').textContent = '';
+  reverseGeocode(editTempLatLng);
+}
+
+function saveLocationEdit() {
+  if (!editTempLatLng) {
+    var activeMap = getActivePreviewMap();
+    if (activeMap) editTempLatLng = getCrosshairLatLng(activeMap);
+  }
+  var savedLat = editTempLatLng ? editTempLatLng.lat : (pendingLatLng ? pendingLatLng.lat : null);
+  var savedLng = editTempLatLng ? editTempLatLng.lng : (pendingLatLng ? pendingLatLng.lng : null);
+  if (savedLat === null) { exitEditMode(); return; }
+
+  exitEditMode();
+
+  pendingLatLng = L.latLng(savedLat, savedLng);
+  document.getElementById('modal-coords').textContent = savedLat.toFixed(5) + ', ' + savedLng.toFixed(5);
+
+  var target = L.latLng(savedLat, savedLng);
+  var activeMap = getActivePreviewMap();
+  if (activeMap) {
+    activeMap.invalidateSize({ animate: false });
+    activeMap.setView(target, activeMap.getZoom(), { animate: false });
+  }
+}
+
+function discardLocationEdit() {
+  var origLat = editOriginalLatLng ? editOriginalLatLng.lat : null;
+  var origLng = editOriginalLatLng ? editOriginalLatLng.lng : null;
+
+  exitEditMode();
+
+  if (origLat !== null) {
+    pendingLatLng = L.latLng(origLat, origLng);
+    document.getElementById('modal-coords').textContent = origLat.toFixed(5) + ', ' + origLng.toFixed(5);
+    document.getElementById('address-text').textContent = '';
+    document.getElementById('address-loading').style.display = 'inline';
+    reverseGeocode(pendingLatLng);
+    setTimeout(function() {
+      var zoom = (previewMapMobile || previewMapDesktop).getZoom();
+      var orig = L.latLng(origLat, origLng);
+      if (previewMapMobile)  { previewMapMobile.invalidateSize();  previewMapMobile.setView(orig,  zoom, { animate: false }); }
+      if (previewMapDesktop) { previewMapDesktop.invalidateSize(); previewMapDesktop.setView(orig, zoom, { animate: false }); }
+    }, 320);
+  }
+}
+
+function exitEditMode() {
+  editMode = false;
+  editTempLatLng = null;
+
+  clearTimeout(editHintTimer);
+  showEditHint();
+
+  [previewMapMobile, previewMapDesktop].forEach(function(m) {
+    if (!m) return;
+    m.off('moveend', onPreviewMoveEnd);
+    m.off('movestart', hideEditHint);
+    m.dragging.disable();
+    m.scrollWheelZoom.disable();
+  });
+
+  document.querySelector('.modal-map-inline') && document.querySelector('.modal-map-inline').classList.remove('edit-mode');
+  document.querySelector('.modal-right')       && document.querySelector('.modal-right').classList.remove('edit-mode');
+  document.querySelectorAll('.preview-crosshair circle').forEach(function(c) { c.classList.remove('edit-pulse'); });
+
+  document.querySelectorAll('.location-edit-start').forEach(function(el) { el.style.display = ''; });
+  document.querySelectorAll('.location-edit-actions').forEach(function(el) { el.classList.remove('visible'); });
+}
+
+// SCROLL-INTO-VIEW ON FOCUS (mobile keyboard pushes viewport up)
+function scrollFieldIntoView(el) {
+  if (!window.visualViewport) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  setTimeout(function() {
+    var vvHeight = window.visualViewport.height;
+    var rect = el.getBoundingClientRect();
+    var scrollEl = document.querySelector('.modal-left');
+    if (!scrollEl) return;
+    var overflow = rect.bottom - vvHeight + 16;
+    if (overflow > 0) { scrollEl.scrollBy({ top: overflow, behavior: 'smooth' }); }
+  }, 120);
+}
+['comment-input', 'photo-input'].forEach(function(id) {
+  var el = document.getElementById(id);
+  if (el) { el.addEventListener('focus', function() { scrollFieldIntoView(this); }); }
+});
+document.querySelectorAll('.rating-btn').forEach(function(btn) {
+  btn.addEventListener('focus', function() { scrollFieldIntoView(this); });
+});
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', function() {
+    var active = document.activeElement;
+    if (active && active.closest('.modal-left')) { scrollFieldIntoView(active); }
+  });
+}
+
+// VALIDATION
+var commentTouched = false;
+var emailTouched   = false;
+var captchaA = 0, captchaB = 0, captchaAnswer = 0;
+
+function generateCaptcha() {
+  captchaA = Math.floor(Math.random() * 9) + 1;
+  captchaB = Math.floor(Math.random() * 9) + 1;
+  captchaAnswer = captchaA + captchaB;
+  document.getElementById('captcha-question').textContent = 'Was ist ' + captchaA + ' + ' + captchaB + '?';
+  document.getElementById('captcha-input').value = '';
+  document.getElementById('captcha-input').classList.remove('field-valid', 'field-invalid');
+  document.getElementById('hint-captcha').classList.remove('visible');
+}
+
+function applyFieldState(el, valid, hintId) {
+  var hint = document.getElementById(hintId);
+  el.classList.toggle('field-valid',   valid);
+  el.classList.toggle('field-invalid', !valid);
+  hint.classList.toggle('visible',     !valid);
+}
+
+function applyCommentState(el, len) {
+  var hint = document.getElementById('hint-comment');
+  if (len >= 20) {
+    el.classList.remove('field-invalid');
+    el.classList.add('field-valid');
+    hint.classList.remove('visible');
+  } else {
+    el.classList.remove('field-valid');
+    el.classList.add('field-invalid');
+    hint.classList.add('visible');
+  }
+}
+
+document.getElementById('comment-input').addEventListener('input', function() {
+  var len = this.value.trim().length;
+  var counter = document.getElementById('char-counter');
+  counter.textContent = len + ' / 20 Zeichen';
+  counter.className = 'char-counter' + (len >= 20 ? ' ok' : '');
+  if (commentTouched) { applyCommentState(this, len); }
+  validateForm();
+});
+document.getElementById('comment-input').addEventListener('blur', function() {
+  commentTouched = true;
+  applyCommentState(this, this.value.trim().length);
+  validateForm();
+});
+
+document.getElementById('name-input').addEventListener('focus', function() { scrollFieldIntoView(this); });
+
+document.getElementById('email-input').addEventListener('blur', function() {
+  emailTouched = true;
+  applyFieldState(this, isValidEmail(this.value.trim()), 'hint-email');
+  validateForm();
+});
+document.getElementById('email-input').addEventListener('input', function() {
+  if (emailTouched) applyFieldState(this, isValidEmail(this.value.trim()), 'hint-email');
+  validateForm();
+});
+document.getElementById('email-input').addEventListener('focus', function() { scrollFieldIntoView(this); });
+
+document.getElementById('captcha-input').addEventListener('blur', function() {
+  applyFieldState(this, parseInt(this.value) === captchaAnswer, 'hint-captcha');
+  validateForm();
+});
+document.getElementById('captcha-input').addEventListener('input', function() {
+  applyFieldState(this, parseInt(this.value) === captchaAnswer, 'hint-captcha');
+  validateForm();
+});
+document.getElementById('captcha-input').addEventListener('focus', function() { scrollFieldIntoView(this); });
+
+function isValidEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+
+function validateForm() {
+  var ok = !!(
+    selectedRating &&
+    document.getElementById('comment-input').value.trim().length >= 20 &&
+    isValidEmail(document.getElementById('email-input').value.trim()) &&
+    parseInt(document.getElementById('captcha-input').value) === captchaAnswer
+  );
+  var btn = document.getElementById('submit-btn');
+  if (ok) { btn.classList.add('ready'); } else { btn.classList.remove('ready'); }
+  return ok;
+}
+
+// PHOTOS -- keeps both a base64 dataUrl (for the thumbnail/lightbox preview, same as
+// velo-melder.html) and the raw File (needed to actually upload it, which that file never does).
+document.getElementById('photo-input').addEventListener('change', function(e) { handleFiles(e.target.files); });
+var ua = document.getElementById('upload-area');
+ua.addEventListener('dragover', function(e) { e.preventDefault(); this.classList.add('drag-over'); });
+ua.addEventListener('dragleave', function() { this.classList.remove('drag-over'); });
+ua.addEventListener('drop', function(e) { e.preventDefault(); this.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+
+function handleFiles(files) {
+  Array.from(files).forEach(function(file) {
+    if (!file.type || !file.type.startsWith('image/')) return;
+    if (pendingPhotos.length >= 5) return;
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      var id = Date.now() + Math.random();
+      pendingPhotos.push({ id: id, dataUrl: e.target.result, file: file });
+      renderThumb(id, e.target.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderThumb(id, dataUrl) {
+  var container = document.getElementById('photo-previews');
+  var div = document.createElement('div'); div.className = 'photo-thumb'; div.id = 'thumb-' + id;
+  var img = document.createElement('img'); img.src = dataUrl; img.alt = 'Vorschau'; img.onclick = function() { openLightbox(dataUrl); };
+  var btn = document.createElement('button'); btn.className = 'photo-thumb-remove'; btn.title = 'Entfernen'; btn.innerHTML = '&times;'; btn.onclick = function() { removePhoto(id); };
+  div.appendChild(img); div.appendChild(btn); container.appendChild(div);
+}
+
+function removePhoto(id) {
+  pendingPhotos = pendingPhotos.filter(function(p) { return p.id !== id; });
+  var el = document.getElementById('thumb-' + id); if (el) el.remove();
+}
+
+function openLightbox(url) { document.getElementById('lightbox-img').src = url; document.getElementById('lightbox').classList.add('open'); }
+function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); }
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { closeLightbox(); closeDetailModal(); closeModal(); } });
+
+function showFormError(msg) {
+  var el = document.getElementById('form-error');
+  el.textContent = msg;
+  el.classList.add('visible');
+}
+
+// SUBMIT -- real POST to the backend (velo-melder.html's submitEntry only pushes to an in-memory
+// array, since it has no backend; validation/focus-management below matches it exactly, only the
+// final step differs).
+function submitEntry() {
+  var valid = true;
+  var firstErrorEl = null;
+  document.getElementById('form-error').classList.remove('visible');
+
+  if (!selectedRating) {
+    document.getElementById('hint-type').classList.add('visible');
+    document.getElementById('rating-scale').classList.add('field-invalid');
+    if (!firstErrorEl) firstErrorEl = document.querySelector('.rating-btn');
+    valid = false;
+  }
+
+  var comment = document.getElementById('comment-input').value.trim();
+  commentTouched = true;
+  applyCommentState(document.getElementById('comment-input'), comment.length);
+  if (comment.length < 20) {
+    if (!firstErrorEl) firstErrorEl = document.getElementById('comment-input');
+    valid = false;
+  }
+
+  var nameVal = document.getElementById('name-input').value.trim();
+
+  emailTouched = true;
+  var emailVal = document.getElementById('email-input').value.trim();
+  var emailOk = isValidEmail(emailVal);
+  applyFieldState(document.getElementById('email-input'), emailOk, 'hint-email');
+  if (!emailOk) { if (!firstErrorEl) firstErrorEl = document.getElementById('email-input'); valid = false; }
+
+  var captchaOk = parseInt(document.getElementById('captcha-input').value) === captchaAnswer;
+  applyFieldState(document.getElementById('captcha-input'), captchaOk, 'hint-captcha');
+  if (!captchaOk) {
+    if (!firstErrorEl) firstErrorEl = document.getElementById('captcha-input');
+    generateCaptcha();
+    valid = false;
+  }
+
+  if (!valid) { if (firstErrorEl) firstErrorEl.focus(); return; }
+  if (!pendingLatLng) return;
+
+  var btn = document.getElementById('submit-btn');
+  var originalText = btn.textContent;
+  btn.textContent = 'Wird gesendet…';
+  btn.disabled = true;
+
+  var fd = new FormData();
+  fd.append('lat', String(pendingLatLng.lat));
+  fd.append('lng', String(pendingLatLng.lng));
+  fd.append('rating', String(selectedRating));
+  fd.append('comment', comment);
+  if (nameVal) fd.append('name', nameVal);
+  fd.append('email', emailVal);
+  pendingPhotos.forEach(function(p) { fd.append('photos[]', p.file); });
+
+  fetch(API_BASE + '/reports', {
+    method: 'POST',
+    headers: { 'X-Challenge-Token': challengeToken },
+    body: fd
+  }).then(function(res) {
+    return res.json().then(function(body) { return { ok: res.ok, body: body }; });
+  }).then(function(result) {
+    btn.textContent = originalText;
+    btn.disabled = false;
+    if (!result.ok) {
+      var msg = result.body && result.body.message ? result.body.message : 'Die Meldung konnte nicht gesendet werden.';
+      if (result.body && result.body.errors) {
+        msg += ' (' + Object.keys(result.body.errors).map(function(k) { return k + ': ' + result.body.errors[k]; }).join(', ') + ')';
+      }
+      showFormError(msg);
+      return;
+    }
+    document.getElementById('modal-form-view').style.display = 'none';
+    document.getElementById('modal-success-view').style.display = '';
+  }).catch(function() {
+    btn.textContent = originalText;
+    btn.disabled = false;
+    showFormError('Verbindung zum Server fehlgeschlagen. Bitte versuchen Sie es erneut.');
+  });
+}
+
+function showToast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(function() { t.classList.remove('show'); }, 2600);
+}
+
+// ============================================================================================
+// Bootstrap: ROUTE_TYPES must come from the API (not hand-duplicated) before the map can create
+// its panes, so map init has to wait for GET /route-types -- see initMap() above.
+// ============================================================================================
+fetch(API_BASE + '/route-types')
+  .then(function(r) { return r.json(); })
+  .then(function(types) {
+    var t = (types || []).filter(function(x) { return x.key === TARGET_ROUTE_TYPE_KEY; })[0];
+    if (!t) throw new Error('Route type "' + TARGET_ROUTE_TYPE_KEY + '" not found in GET /route-types response.');
+    ROUTE_TYPES = [t];
+    initMap();
+    return fetch(API_BASE + '/routes');
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(geojson) {
+    loadScript('https://cdn.jsdelivr.net/npm/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.min.js', function() {
+      renderGeoJSON(geojson, /* smooth */ true, /* hideBand */ true);
+      rebuildDecorators();
+    });
+    return fetch(API_BASE + '/reports');
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(reports) {
+    (reports || []).forEach(addReportMarker);
+  })
+  .catch(function(err) {
+    console.error('Failed to load map data', err);
+    showToast('Fehler beim Laden der Karte. Bitte Seite neu laden.');
+  });
+</script>
+</body>
+</html>
