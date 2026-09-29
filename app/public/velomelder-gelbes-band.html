@@ -1045,7 +1045,26 @@ function selectDetailPhoto(url, thumbEl) {
   if (thumbEl) thumbEl.classList.add('active');
 }
 
+// Deep-linking: the URL's ?meldung=<id> mirrors whichever detail modal is open, so a reporter can
+// copy the URL to share a specific Meldung, and reloading/opening that URL directly reopens the
+// same modal via the exact same openDetailModal() a pin click uses. pushState (not replaceState)
+// on both open and close so the browser Back/Forward buttons step through modal open/closed state
+// too, not just page navigation -- see the popstate listener in the bootstrap section below.
+function getMeldungIdFromUrl() {
+  return new URLSearchParams(location.search).get('meldung');
+}
+
+function buildUrlWithMeldung(id) {
+  var params = new URLSearchParams(location.search);
+  if (id) { params.set('meldung', id); } else { params.delete('meldung'); }
+  var qs = params.toString();
+  return location.pathname + (qs ? '?' + qs : '') + location.hash;
+}
+
 function openDetailModal(entry) {
+  if (getMeldungIdFromUrl() !== entry.id) {
+    history.pushState({ meldungId: entry.id }, '', buildUrlWithMeldung(entry.id));
+  }
   var cfg = RATINGS[entry.rating];
   document.querySelector('.detail-modal').style.borderTopColor = cfg.color;
   var badge = document.getElementById('detail-badge');
@@ -1109,6 +1128,9 @@ function openDetailModal(entry) {
 function closeDetailModal() {
   document.getElementById('detail-modal-overlay').classList.remove('open');
   resetDetailMapExpanded();
+  if (getMeldungIdFromUrl()) {
+    history.pushState({}, '', buildUrlWithMeldung(null));
+  }
 }
 document.getElementById('detail-modal-overlay').addEventListener('click', function(e) { if (e.target === this) closeDetailModal(); });
 
@@ -1823,11 +1845,37 @@ fetch(API_BASE + '/route-types')
   .then(function(reports) {
     (reports || []).forEach(addReportMarker);
     renderPendingMarkers(reports || []);
+
+    // Deep link on initial load, e.g. a URL someone copied from a previous openDetailModal() call
+    // -- open the same detail modal a pin click would, using a report from this same fetch so it
+    // has the full comment/photos/etc, not just an id.
+    var deepLinkId = getMeldungIdFromUrl();
+    if (deepLinkId) {
+      var entry = (reports || []).filter(function(r) { return r.id === deepLinkId; })[0];
+      if (entry) openDetailModal(entry);
+    }
   })
   .catch(function(err) {
     console.error('Failed to load map data', err);
     showToast('Fehler beim Laden der Karte. Bitte Seite neu laden.');
   });
+
+// Keep the modal in sync with browser Back/Forward through the pushState history entries that
+// openDetailModal()/closeDetailModal() create -- e.g. Back after opening a Meldung closes it again
+// rather than leaving the modal open with a now-stale URL.
+window.addEventListener('popstate', function() {
+  var id = getMeldungIdFromUrl();
+  if (!id) {
+    closeDetailModal();
+    return;
+  }
+  var entry = lastPublishedReports.filter(function(r) { return r.id === id; })[0];
+  if (entry) {
+    openDetailModal(entry);
+  } else {
+    closeDetailModal();
+  }
+});
 </script>
 </body>
 </html>
