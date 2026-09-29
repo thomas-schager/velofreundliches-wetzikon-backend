@@ -99,6 +99,6 @@ class PublicReportsController extends AbstractApiController
             return $this->errorResponse('expired', $e->getMessage(), 410);
         }
 
-        return new Response('Bestätigt — Ihre Meldung wartet nun auf die Prüfung durch die Redaktion.', 200);
+        return new Response('Bestätigt — deine Meldung wartet nun auf die Prüfung durch die Redaktion.', 200);
     }
 }

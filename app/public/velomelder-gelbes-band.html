@@ -176,6 +176,13 @@ header {
 }
 
 .preview-crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); pointer-events: none; z-index: 1000; }
+/* Shown instead of the crosshair/"Standort anpassen" once a report has actually been sent --
+   position matches a real Leaflet marker's anchor (bottom-center of the pin shape) so it lines up
+   with where a real marker would sit once this report is published at the same spot. */
+.preview-pin-pending { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -100%); pointer-events: none; z-index: 999; display: none; }
+.modal-right.pending-mode .preview-crosshair,
+.modal-right.pending-mode .map-location-controls { display: none; }
+.modal-right.pending-mode .preview-pin-pending { display: block; }
 
 /* On-scale: was 20px (between --text-lg/--text-xl, ported verbatim from velo-melder.html's own
    off-scale value), now --text-xl. */
@@ -561,9 +568,9 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
       </div>
 
       <div id="modal-success-view" class="success-panel" style="display:none">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l2.5 2.5L16 9"/></svg>
-        <h2 class="modal-title">Vielen Dank!</h2>
-        <p>Wir haben Ihnen eine E-Mail geschickt. Bitte bestätigen Sie Ihre Meldung über den Link darin — erst danach wird sie geprüft und veröffentlicht.</p>
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-8.97 6.31a1.94 1.94 0 0 1-2.06 0L2 6"/></svg>
+        <h2 class="modal-title">Danke – bitte bestätigen</h2>
+        <p>Wir haben dir eine E-Mail geschickt. Bitte bestätige die Meldung mit dem Link darin – anschliessend wird sie geprüft und veröffentlicht.</p>
         <div class="modal-actions" style="justify-content:center;margin-top:20px;">
           <button type="button" class="btn btn-primary ready" onclick="closeModal()">Schliessen</button>
         </div>
@@ -600,6 +607,7 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
         <line x1="2" y1="12" x2="8" y2="12" stroke="#ca8a04" stroke-width="2" stroke-linecap="round"/>
         <line x1="16" y1="12" x2="22" y2="12" stroke="#ca8a04" stroke-width="2" stroke-linecap="round"/>
       </svg>
+      <div class="custom-pin preview-pin-pending" id="preview-pin-pending" aria-hidden="true"></div>
     </div>
   </div>
 </div>
@@ -675,7 +683,7 @@ var isVelonetz = false;
 // COMPILE:MAP-ENGINE
 var CARTO_API_KEY = 'cb1_2wxo_1_5095e615a6275239af744999';
 var map, LAYERS, currentLayer = 'street';
-var bandGroup, highlightGroup, drawnItems, decoratorGroup, waypointGroup;
+var bandGroup, highlightGroup, drawnItems, decoratorGroup, waypointGroup, pendingGroup;
 
 function initMap() {
   map = L.map('map', { center: [47.3235, 8.7985], zoom: 15 });
@@ -691,6 +699,7 @@ function initMap() {
   drawnItems     = new L.FeatureGroup().addTo(map);
   decoratorGroup = L.layerGroup().addTo(map);
   waypointGroup  = L.layerGroup().addTo(map);
+  pendingGroup   = L.layerGroup().addTo(map);
   map.on('zoomend', function() { rebuildDecorators(); });
 
   var toggleEl = document.querySelector('.map-toggle');
@@ -884,19 +893,96 @@ var RATINGS = {
   5: { label: 'Ausgezeichnet',color: '#15803d', bg: 'rgba(21,128,61,0.12)' }
 };
 
-function makeIcon(rating) {
-  var cfg = RATINGS[rating];
-  var svg = '<svg viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">'
-    + '<path d="M12 0C5.37 0 0 5.37 0 12c0 8.5 12 20 12 20S24 20.5 24 12C24 5.37 18.63 0 12 0z" fill="' + cfg.color + '"/>'
+function pinSvg(color) {
+  return '<svg viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">'
+    + '<path d="M12 0C5.37 0 0 5.37 0 12c0 8.5 12 20 12 20S24 20.5 24 12C24 5.37 18.63 0 12 0z" fill="' + color + '"/>'
     + '<circle cx="12" cy="12" r="5" fill="rgba(255,255,255,0.35)"/>'
     + '</svg>';
-  return L.divIcon({ html: '<div class="custom-pin">' + svg + '</div>', iconSize: [24, 32], iconAnchor: [12, 32], popupAnchor: [0, -34], className: '' });
+}
+
+function makeIcon(rating) {
+  var cfg = RATINGS[rating];
+  return L.divIcon({ html: '<div class="custom-pin">' + pinSvg(cfg.color) + '</div>', iconSize: [24, 32], iconAnchor: [12, 32], popupAnchor: [0, -34], className: '' });
 }
 
 function addReportMarker(entry) {
   var marker = L.marker([entry.lat, entry.lng], { icon: makeIcon(entry.rating) });
   marker.on('click', function(e) { L.DomEvent.stopPropagation(e); openDetailModal(entry); });
   marker.addTo(waypointGroup);
+}
+
+// ============================================================================================
+// "Your own pending Meldung" pin -- tracked client-side only (localStorage), so a reporter can
+// see where their own submission landed on the map while it's still working through email
+// confirmation + admin review, without the backend exposing anything about it to other visitors.
+// Not a real interactive marker like addReportMarker's -- there's nothing public to show yet, so
+// a click just gives a lean "still being checked" toast (see openDetailModal for the real thing).
+// ============================================================================================
+var PENDING_PIN_COLOR = '#9ca3af'; // grey: distinct from every (saturated) rating color and from
+                                    // the yellow crosshair shown while still choosing a location
+var PENDING_STORAGE_KEY = 'velomelder_pending_reports';
+var PENDING_TTL_DAYS = 7; // local safety-net cleanup for a report that never gets confirmed/approved
+var lastPublishedReports = []; // most recent GET /reports result, reused by addPendingReport()
+                                // so it doesn't need its own extra fetch right after submitting
+
+function makePendingIcon() {
+  return L.divIcon({ html: '<div class="custom-pin">' + pinSvg(PENDING_PIN_COLOR) + '</div>', iconSize: [24, 32], iconAnchor: [12, 32], popupAnchor: [0, -34], className: '' });
+}
+
+function loadPendingReports() {
+  var raw;
+  try {
+    raw = localStorage.getItem(PENDING_STORAGE_KEY);
+  } catch (e) {
+    return []; // private browsing / storage disabled -- degrade to "no pending pins", not a crash
+  }
+  var list;
+  try {
+    list = raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    list = [];
+  }
+  var cutoff = Date.now() - PENDING_TTL_DAYS * 24 * 60 * 60 * 1000;
+  var fresh = list.filter(function(p) { return p && p.submittedAt > cutoff; });
+  if (fresh.length !== list.length) savePendingReports(fresh);
+  return fresh;
+}
+
+function savePendingReports(list) {
+  try {
+    localStorage.setItem(PENDING_STORAGE_KEY, JSON.stringify(list));
+  } catch (e) {
+    // ignore -- worst case the pin just doesn't persist across reloads
+  }
+}
+
+function addPendingReport(id, lat, lng) {
+  var list = loadPendingReports();
+  list.push({ id: id, lat: lat, lng: lng, submittedAt: Date.now() });
+  savePendingReports(list);
+  renderPendingMarkers(lastPublishedReports);
+}
+
+function renderPendingMarkers(publishedReports) {
+  lastPublishedReports = publishedReports || [];
+  var publishedIds = {};
+  lastPublishedReports.forEach(function(r) { publishedIds[r.id] = true; });
+
+  // Once a pending report shows up in the real published list, drop it from local tracking for
+  // good -- otherwise we'd render both the grey pin and the real rating-colored one at once.
+  var pending = loadPendingReports();
+  var stillPending = pending.filter(function(p) { return !publishedIds[p.id]; });
+  if (stillPending.length !== pending.length) savePendingReports(stillPending);
+
+  pendingGroup.clearLayers();
+  stillPending.forEach(function(p) {
+    var marker = L.marker([p.lat, p.lng], { icon: makePendingIcon() });
+    marker.on('click', function(e) {
+      L.DomEvent.stopPropagation(e);
+      showToast('Deine Meldung – in Verifikation');
+    });
+    marker.addTo(pendingGroup);
+  });
 }
 
 // DETAIL MODAL -- opened by clicking a pin; shows the full Meldung with a location map strip
@@ -1247,6 +1333,7 @@ function openModal(latlng) {
   document.getElementById('modal-form-view').style.display = '';
   document.getElementById('modal-success-view').style.display = 'none';
   document.getElementById('form-error').classList.remove('visible');
+  document.querySelector('.modal-right').classList.remove('pending-mode');
 
   selectedRating = null; pendingPhotos = [];
   document.querySelectorAll('.rating-btn').forEach(function(b) { b.classList.remove('selected'); });
@@ -1691,10 +1778,14 @@ function submitEntry() {
     }
     document.getElementById('modal-form-view').style.display = 'none';
     document.getElementById('modal-success-view').style.display = '';
+    document.querySelector('.modal-right').classList.add('pending-mode');
+    if (result.body && result.body.id) {
+      addPendingReport(result.body.id, pendingLatLng.lat, pendingLatLng.lng);
+    }
   }).catch(function() {
     btn.textContent = originalText;
     btn.disabled = false;
-    showFormError('Verbindung zum Server fehlgeschlagen. Bitte versuchen Sie es erneut.');
+    showFormError('Verbindung zum Server fehlgeschlagen. Bitte versuche es erneut.');
   });
 }
 
@@ -1704,6 +1795,8 @@ function showToast(msg) {
   t.classList.add('show');
   setTimeout(function() { t.classList.remove('show'); }, 2600);
 }
+
+document.getElementById('preview-pin-pending').innerHTML = pinSvg(PENDING_PIN_COLOR);
 
 // ============================================================================================
 // Bootstrap: ROUTE_TYPES must come from the API (not hand-duplicated) before the map can create
@@ -1729,6 +1822,7 @@ fetch(API_BASE + '/route-types')
   .then(function(r) { return r.json(); })
   .then(function(reports) {
     (reports || []).forEach(addReportMarker);
+    renderPendingMarkers(reports || []);
   })
   .catch(function(err) {
     console.error('Failed to load map data', err);

@@ -111,13 +111,13 @@ class ReportSubmissionService
             $this->mailer->send((new Email())
                 ->from('notifications@velofreundliches-wetzikon.ch')
                 ->to($email)
-                ->subject('Bitte bestätigen Sie Ihre VeloMelder-Meldung')
+                ->subject('Bitte bestätige deine VeloMelder-Meldung')
                 ->text(
-                    "Vielen Dank für Ihre Meldung bei VeloMelder.\n\n"
-                    . "Damit sie geprüft und veröffentlicht werden kann, bestätigen Sie bitte Ihre E-Mail-Adresse:\n"
+                    "Vielen Dank für deine Meldung bei VeloMelder.\n\n"
+                    . "Damit sie geprüft und veröffentlicht werden kann, bestätige bitte deine E-Mail-Adresse:\n"
                     . "{$confirmUrl}\n\n"
-                    . "Der Link ist " . self::CONFIRMATION_TTL_HOURS . " Stunden gültig. Falls Sie diese Meldung nicht "
-                    . "abgeschickt haben, können Sie diese E-Mail ignorieren -- ohne Bestätigung wird nichts veröffentlicht.\n\n"
+                    . "Der Link ist " . self::CONFIRMATION_TTL_HOURS . " Stunden gültig. Falls du diese Meldung nicht "
+                    . "abgeschickt hast, kannst du diese E-Mail ignorieren -- ohne Bestätigung wird nichts veröffentlicht.\n\n"
                     . "Velofreundliches Wetzikon"
                 ));
         } catch (TransportExceptionInterface $e) {
