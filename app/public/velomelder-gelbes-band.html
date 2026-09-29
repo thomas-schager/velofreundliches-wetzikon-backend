@@ -284,7 +284,7 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
 .success-panel svg { color: var(--vw-success-dark); margin-bottom: var(--space-3); }
 .success-panel .modal-title { padding-right: 0; }
 .success-panel p { color: var(--vw-muted-strong); font-size: var(--text-sm); line-height: 1.5; }
-.form-error { font-size: var(--text-sm); color: var(--vw-primary); background: var(--vw-primary-tint); border-radius: var(--vw-radius-sm); padding: 10px var(--space-3); margin-bottom: var(--space-4); display: none; }
+.form-error { font-size: var(--text-sm); color: var(--vw-primary); background: var(--vw-primary-tint); border-radius: var(--vw-radius-sm); padding: 10px var(--space-3); margin-top: var(--space-4); margin-bottom: var(--space-4); display: none; }
 .form-error.visible { display: block; }
 
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.82); z-index: 5000; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity var(--vw-dur) var(--vw-ease); }
@@ -1449,16 +1449,35 @@ if (window.visualViewport) {
 // VALIDATION
 var commentTouched = false;
 var emailTouched   = false;
-var captchaA = 0, captchaB = 0, captchaAnswer = 0;
+// The server owns the challenge (see GET /reports/challenge / CaptchaChallengeService) -- it
+// won't accept our own operands/answer, only the operands it issued for this challengeToken. This
+// local captchaAnswer is just for instant client-side field-state feedback as the user types;
+// the actual accept/reject happens server-side in submitEntry()'s POST /reports response.
+var captchaA = null, captchaB = null, captchaAnswer = null;
+// Echoed back by GET /reports/challenge (see CaptchaChallengeService::TTL_SECONDS) -- kept here
+// rather than hardcoded so the "abgelaufen" message below can never drift out of sync with the
+// server's actual expiry window. Falls back to 20 if a submit somehow races ahead of the very
+// first challenge fetch resolving.
+var captchaTtlSeconds = null;
 
 function generateCaptcha() {
-  captchaA = Math.floor(Math.random() * 9) + 1;
-  captchaB = Math.floor(Math.random() * 9) + 1;
-  captchaAnswer = captchaA + captchaB;
-  document.getElementById('captcha-question').textContent = 'Was ist ' + captchaA + ' + ' + captchaB + '?';
+  document.getElementById('captcha-question').textContent = '…';
   document.getElementById('captcha-input').value = '';
   document.getElementById('captcha-input').classList.remove('field-valid', 'field-invalid');
   document.getElementById('hint-captcha').classList.remove('visible');
+  captchaA = null; captchaB = null; captchaAnswer = null;
+  fetch(API_BASE + '/reports/challenge', { headers: { 'X-Challenge-Token': challengeToken } })
+    .then(function(res) { return res.json(); })
+    .then(function(body) {
+      captchaA = body.a;
+      captchaB = body.b;
+      captchaAnswer = body.a + body.b;
+      captchaTtlSeconds = body.ttlSeconds;
+      document.getElementById('captcha-question').textContent = 'Was ist ' + captchaA + ' + ' + captchaB + '?';
+    })
+    .catch(function() {
+      document.getElementById('captcha-question').textContent = 'Sicherheitsfrage konnte nicht geladen werden.';
+    });
 }
 
 function applyFieldState(el, valid, hintId) {
@@ -1509,11 +1528,18 @@ document.getElementById('email-input').addEventListener('input', function() {
 document.getElementById('email-input').addEventListener('focus', function() { scrollFieldIntoView(this); });
 
 document.getElementById('captcha-input').addEventListener('blur', function() {
-  applyFieldState(this, parseInt(this.value) === captchaAnswer, 'hint-captcha');
+  var ok = parseInt(this.value) === captchaAnswer;
+  applyFieldState(this, ok, 'hint-captcha');
+  // The "Falsche Antwort" hint (a fresh, still-valid question) supersedes any stale server-side
+  // error from a previous attempt (e.g. the "abgelaufen" message) -- leaving both visible at once
+  // reads as contradictory.
+  if (!ok) document.getElementById('form-error').classList.remove('visible');
   validateForm();
 });
 document.getElementById('captcha-input').addEventListener('input', function() {
-  applyFieldState(this, parseInt(this.value) === captchaAnswer, 'hint-captcha');
+  var ok = parseInt(this.value) === captchaAnswer;
+  applyFieldState(this, ok, 'hint-captcha');
+  if (!ok) document.getElementById('form-error').classList.remove('visible');
   validateForm();
 });
 document.getElementById('captcha-input').addEventListener('focus', function() { scrollFieldIntoView(this); });
@@ -1631,6 +1657,7 @@ function submitEntry() {
   fd.append('comment', comment);
   if (nameVal) fd.append('name', nameVal);
   fd.append('email', emailVal);
+  fd.append('captchaAnswer', document.getElementById('captcha-input').value.trim());
   pendingPhotos.forEach(function(p) { fd.append('photos[]', p.file); });
 
   fetch(API_BASE + '/reports', {
@@ -1643,9 +1670,21 @@ function submitEntry() {
     btn.textContent = originalText;
     btn.disabled = false;
     if (!result.ok) {
-      var msg = result.body && result.body.message ? result.body.message : 'Die Meldung konnte nicht gesendet werden.';
-      if (result.body && result.body.errors) {
-        msg += ' (' + Object.keys(result.body.errors).map(function(k) { return k + ': ' + result.body.errors[k]; }).join(', ') + ')';
+      var details = result.body && result.body.details;
+      var otherDetails = details ? Object.keys(details).filter(function(k) { return k !== 'captchaAnswer'; }) : [];
+      var msg;
+      if (details && details.captchaAnswer) {
+        // Client-side check passed (rare: challenge expired mid-fill, or answered before the
+        // server response arrived) -- issue a fresh challenge rather than leaving a dead one.
+        var ttlMins = Math.round((captchaTtlSeconds || 1200) / 60);
+        msg = 'Die Sicherheitsfrage ist abgelaufen (' + ttlMins + ' Minuten). Bitte löse die Aufgabe erneut vor dem Absenden.';
+        applyFieldState(document.getElementById('captcha-input'), false, 'hint-captcha');
+        generateCaptcha();
+      } else {
+        msg = result.body && result.body.message ? result.body.message : 'Die Meldung konnte nicht gesendet werden.';
+      }
+      if (otherDetails.length) {
+        msg += ' (' + otherDetails.map(function(k) { return k + ': ' + details[k]; }).join(', ') + ')';
       }
       showFormError(msg);
       return;

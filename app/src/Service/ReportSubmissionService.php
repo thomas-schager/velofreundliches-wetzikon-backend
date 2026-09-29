@@ -36,15 +36,16 @@ class ReportSubmissionService
         private readonly LoggerInterface $logger,
         private readonly RouterInterface $router,
         private readonly MailerInterface $mailer,
+        private readonly CaptchaChallengeService $captcha,
         private readonly string $uploadsDir,
     ) {
     }
 
     /**
-     * @param array{lat: mixed, lng: mixed, rating: mixed, comment: mixed, name?: mixed, email: mixed} $data
+     * @param array{lat: mixed, lng: mixed, rating: mixed, comment: mixed, name?: mixed, email: mixed, captchaAnswer?: mixed} $data
      * @param UploadedFile[] $photos
      */
-    public function submit(array $data, array $photos): Report
+    public function submit(array $data, array $photos, ?string $challengeToken): Report
     {
         $errors = [];
 
@@ -72,6 +73,9 @@ class ReportSubmissionService
         }
         if (count($photos) > self::MAX_PHOTOS) {
             $errors['photos'] = 'max ' . self::MAX_PHOTOS . ' photos';
+        }
+        if (!$this->captcha->verify($challengeToken, $data['captchaAnswer'] ?? null)) {
+            $errors['captchaAnswer'] = 'incorrect or expired, request a new challenge via GET /reports/challenge';
         }
 
         if ($errors !== []) {

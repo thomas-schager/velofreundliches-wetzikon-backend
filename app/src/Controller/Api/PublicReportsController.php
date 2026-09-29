@@ -4,6 +4,7 @@ namespace App\Controller\Api;
 
 use App\Entity\Report;
 use App\Repository\ReportRepository;
+use App\Service\CaptchaChallengeService;
 use App\Service\Exception\ExpiredChallengeException;
 use App\Service\Exception\ReportNotFoundException;
 use App\Service\Exception\ValidationException;
@@ -16,16 +17,27 @@ use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * Public, unauthenticated report endpoints -- see api/openapi.yaml "Public — Reports".
- * Replaces the static velo-meldungen.json fetch. Anti-abuse (X-Challenge-Token) is accepted but
- * not verified in this local-dev pass, per the task's explicit scope -- see README.md/DATABASE.md
- * status notes.
+ * Replaces the static velo-meldungen.json fetch. Anti-abuse: the X-Challenge-Token header is
+ * verified against a server-issued arithmetic challenge (see GET /reports/challenge and
+ * CaptchaChallengeService) -- the client cannot supply its own operands/answer and pass.
  */
 class PublicReportsController extends AbstractApiController
 {
     public function __construct(
         private readonly ReportRepository $reports,
         private readonly ReportSubmissionService $submissionService,
+        private readonly CaptchaChallengeService $captcha,
     ) {
+    }
+
+    #[Route('/reports/challenge', name: 'api_reports_challenge', methods: ['GET'])]
+    public function challenge(Request $request): JsonResponse
+    {
+        if (!$request->headers->has('X-Challenge-Token')) {
+            return $this->errorResponse('validation_error', 'X-Challenge-Token header is required.', 400);
+        }
+
+        return new JsonResponse($this->captcha->issue($request->headers->get('X-Challenge-Token')));
     }
 
     #[Route('/reports', name: 'api_reports_list', methods: ['GET'])]
@@ -65,7 +77,7 @@ class PublicReportsController extends AbstractApiController
         }
 
         try {
-            $report = $this->submissionService->submit($request->request->all(), $photos);
+            $report = $this->submissionService->submit($request->request->all(), $photos, $request->headers->get('X-Challenge-Token'));
         } catch (ValidationException $e) {
             return $this->errorResponse('validation_error', $e->getMessage(), 400, $e->getErrors());
         }
