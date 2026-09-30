@@ -231,9 +231,15 @@ textarea.field-invalid { border-color: var(--vw-primary); box-shadow: 0 0 0 3px 
 .upload-hint { font-size: var(--text-sm); color: var(--vw-muted-strong); line-height: 1.5; font-family: var(--vw-font-body); }
 .upload-hint strong { color: var(--vw-dark); font-weight: 500; }
 .photo-previews { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: 10px; }
-.photo-thumb { position: relative; width: 60px; height: 60px; border-radius: var(--vw-radius-sm); overflow: hidden; border: 1px solid var(--vw-border); flex-shrink: 0; }
+/* 76px -- matches .detail-photo-thumbs' own desktop column width (see that rule below), so a
+   photo you're about to submit previews at the same size it'll actually appear at once published,
+   not the old, smaller 60px square. */
+.photo-thumb { position: relative; width: 76px; height: 76px; border-radius: var(--vw-radius-sm); overflow: hidden; border: 1px solid var(--vw-border); flex-shrink: 0; }
 .photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; cursor: pointer; }
-.photo-thumb-remove { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,0.45); color: #fff; border: none; cursor: pointer; font-size: 11px; display: flex; align-items: center; justify-content: center; padding: 0; transition: background var(--vw-dur); }
+/* Still a quick-delete shortcut (see .photo-viewer-remove for the real, properly-sized removal
+   control reachable by opening the photo), but bigger and better-spaced than the old 18px circle,
+   which was smaller than every other tappable control in this form. */
+.photo-thumb-remove { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; border-radius: 50%; background: rgba(0,0,0,0.5); color: #fff; border: none; cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; padding: 0; transition: background var(--vw-dur); }
 .photo-thumb-remove:hover { background: rgba(185,28,28,0.85); }
 
 .location-edit-bar { display: flex; align-items: center; justify-content: space-between; margin-top: var(--space-4); margin-bottom: var(--space-5); min-height: 40px; }
@@ -294,11 +300,28 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
 .form-error { font-size: var(--text-sm); color: var(--vw-primary); background: var(--vw-primary-tint); border-radius: var(--vw-radius-sm); padding: 10px var(--space-3); margin-top: var(--space-4); margin-bottom: var(--space-4); display: none; }
 .form-error.visible { display: block; }
 
-.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.82); z-index: 5000; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity var(--vw-dur) var(--vw-ease); }
-.lightbox.open { opacity: 1; pointer-events: all; }
-.lightbox img { max-width: 90vw; max-height: 88vh; border-radius: var(--vw-radius-md); box-shadow: var(--vw-shadow-lg); }
-.lightbox-close { position: absolute; top: 18px; right: 22px; background: none; border: none; color: #fff; font-size: 1.75rem; cursor: pointer; opacity: 0.6; line-height: 1; transition: opacity var(--vw-dur); }
-.lightbox-close:hover { opacity: 1; }
+/* Native <dialog> instead of a hand-rolled fixed-overlay div (the old .lightbox) -- shared by both
+   the read-only detail view and the editable upload preview (see openPhotoViewer()'s mode param).
+   Using <dialog> means the browser's own top-layer handles stacking/backdrop/focus-trap/Escape,
+   so there's no manual z-index coordination needed against the modal it's opened from underneath. */
+.photo-viewer { border: none; padding: 0; background: transparent; max-width: 94vw; max-height: 94vh; overflow: visible; z-index: 5000; }
+.photo-viewer::backdrop { background: rgba(0,0,0,0.82); }
+.photo-viewer-img { display: block; max-width: 92vw; max-height: 80vh; border-radius: var(--vw-radius-md); box-shadow: var(--vw-shadow-lg); }
+.photo-viewer-close { position: fixed; top: 18px; right: 22px; width: 32px; height: 32px; padding: 0; background: none; border: none; color: #fff; cursor: pointer; opacity: 0.7; display: flex; align-items: center; justify-content: center; transition: opacity var(--vw-dur); }
+.photo-viewer-close:hover { opacity: 1; }
+.photo-viewer-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border-radius: var(--vw-radius-full); border: none; background: rgba(255,255,255,0.15); color: #fff; font-size: 1.5rem; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background var(--vw-dur); }
+.photo-viewer-nav:hover { background: rgba(255,255,255,0.3); }
+.photo-viewer-nav:disabled { opacity: 0; pointer-events: none; }
+.photo-viewer-prev { left: 18px; }
+.photo-viewer-next { right: 18px; }
+.photo-viewer-footer { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; }
+.photo-viewer-counter { display: none; color: #fff; font-size: var(--text-sm); font-family: var(--vw-font-body); background: rgba(0,0,0,0.45); padding: 5px 14px; border-radius: var(--vw-radius-full); }
+.photo-viewer-counter.multi { display: inline-block; }
+/* Real remove action (44px button, real label) instead of the tiny thumbnail "x" -- only shown in
+   edit mode (the upload preview), never for viewing someone else's published Meldung. */
+.photo-viewer-remove { display: none; align-items: center; gap: 6px; padding: 10px 18px; min-height: 44px; border-radius: var(--vw-radius-full); border: none; background: #fff; color: var(--vw-primary); font-family: var(--vw-font-body); font-size: var(--text-sm); font-weight: 500; cursor: pointer; transition: background var(--vw-dur); }
+.photo-viewer-remove:hover { background: var(--vw-primary-tint); }
+.photo-viewer.edit-mode .photo-viewer-remove { display: inline-flex; }
 
 /* Detail modal (existing report, read-only) -- ported from velo-melder.html's own detail modal
    (map strip + badge/address/comment + main-photo-with-thumbnail-strip gallery + footer), same
@@ -612,11 +635,21 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
   </div>
 </div>
 
-<!-- Photo upload preview lightbox -- ported from velo-melder.html -->
-<div class="lightbox" id="lightbox" onclick="closeLightbox()">
-  <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
-  <img id="lightbox-img" src="" alt="Foto" onclick="event.stopPropagation()" />
-</div>
+<!-- Shared photo viewer -- both the read-only detail view and the editable upload preview open
+     this same <dialog> (see openPhotoViewer()'s mode param); the "Foto entfernen" footer button
+     only ever appears in edit mode (CSS-gated on .photo-viewer.edit-mode). -->
+<dialog class="photo-viewer" id="photo-viewer">
+  <button class="photo-viewer-close" onclick="closePhotoViewer()" type="button" aria-label="Schliessen">
+    <svg width="16" height="16" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><line x1="1" y1="1" x2="13" y2="13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><line x1="13" y1="1" x2="1" y2="13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+  </button>
+  <button class="photo-viewer-nav photo-viewer-prev" id="photo-viewer-prev" onclick="photoViewerStep(-1)" type="button" aria-label="Vorheriges Foto">&#8249;</button>
+  <img class="photo-viewer-img" id="photo-viewer-img" src="" alt="Foto" />
+  <button class="photo-viewer-nav photo-viewer-next" id="photo-viewer-next" onclick="photoViewerStep(1)" type="button" aria-label="Nächstes Foto">&#8250;</button>
+  <div class="photo-viewer-footer">
+    <span class="photo-viewer-counter" id="photo-viewer-counter"></span>
+    <button class="photo-viewer-remove" onclick="photoViewerRemoveCurrent()" type="button">Foto entfernen</button>
+  </div>
+</dialog>
 
 <!-- Detail (view existing report) modal -- ported from velo-melder.html's own detail modal:
      location map strip + badge/address/comment + main-photo-with-thumbnails gallery + footer. -->
@@ -652,7 +685,7 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
       <div class="detail-photos" id="detail-photos" style="display:none">
         <div class="detail-gallery">
           <div class="detail-photo-main-wrap">
-            <img class="detail-photo-main" id="detail-photo-main" src="" alt="Foto -- antippen zum Vergrössern" onclick="openLightbox(this.src)" />
+            <img class="detail-photo-main" id="detail-photo-main" src="" alt="Foto -- antippen zum Vergrössern" onclick="openDetailPhotoViewer()" />
           </div>
           <div class="detail-photo-thumbs" id="detail-photo-thumbs"></div>
         </div>
@@ -1039,10 +1072,17 @@ function initDetailMap(entry) {
   setTimeout(function() { detailMap.invalidateSize(); }, 80);
 }
 
-function selectDetailPhoto(url, thumbEl) {
-  document.getElementById('detail-photo-main').src = url;
-  document.querySelectorAll('#detail-photo-thumbs img').forEach(function(t) { t.classList.remove('active'); });
-  if (thumbEl) thumbEl.classList.add('active');
+var currentDetailPhotos = [];
+var currentDetailPhotoIndex = 0;
+
+function selectDetailPhoto(i) {
+  currentDetailPhotoIndex = i;
+  document.getElementById('detail-photo-main').src = currentDetailPhotos[i];
+  document.querySelectorAll('#detail-photo-thumbs img').forEach(function(t, idx) { t.classList.toggle('active', idx === i); });
+}
+
+function openDetailPhotoViewer() {
+  openPhotoViewer(currentDetailPhotos.map(function(u) { return { url: u }; }), currentDetailPhotoIndex, 'view');
 }
 
 // Deep-linking: the URL's ?meldung=<id> mirrors whichever detail modal is open, so a reporter can
@@ -1098,6 +1138,8 @@ function openDetailModal(entry) {
   var photosEl = document.getElementById('detail-photos');
   var thumbsEl = document.getElementById('detail-photo-thumbs');
   thumbsEl.innerHTML = '';
+  currentDetailPhotos = entry.photos || [];
+  currentDetailPhotoIndex = 0;
   if (entry.photos && entry.photos.length) {
     photosEl.style.display = 'block';
     document.getElementById('detail-photo-main').src = entry.photos[0];
@@ -1108,7 +1150,7 @@ function openDetailModal(entry) {
         img.src = url;
         img.alt = 'Foto ' + (i + 1);
         if (i === 0) img.className = 'active';
-        img.addEventListener('click', function() { selectDetailPhoto(url, img); });
+        img.addEventListener('click', function() { selectDetailPhoto(i); });
         thumbsEl.appendChild(img);
       });
     } else {
@@ -1667,7 +1709,7 @@ function validateForm() {
   return ok;
 }
 
-// PHOTOS -- keeps both a base64 dataUrl (for the thumbnail/lightbox preview, same as
+// PHOTOS -- keeps both a base64 dataUrl (for the thumbnail/photo-viewer preview, same idea as
 // velo-melder.html) and the raw File (needed to actually upload it, which that file never does).
 document.getElementById('photo-input').addEventListener('change', function(e) { handleFiles(e.target.files); });
 var ua = document.getElementById('upload-area');
@@ -1692,8 +1734,14 @@ function handleFiles(files) {
 function renderThumb(id, dataUrl) {
   var container = document.getElementById('photo-previews');
   var div = document.createElement('div'); div.className = 'photo-thumb'; div.id = 'thumb-' + id;
-  var img = document.createElement('img'); img.src = dataUrl; img.alt = 'Vorschau'; img.onclick = function() { openLightbox(dataUrl); };
-  var btn = document.createElement('button'); btn.className = 'photo-thumb-remove'; btn.title = 'Entfernen'; btn.innerHTML = '&times;'; btn.onclick = function() { removePhoto(id); };
+  var img = document.createElement('img'); img.src = dataUrl; img.alt = 'Vorschau'; img.onclick = function() { openUploadPhotoViewer(id); };
+  var btn = document.createElement('button'); btn.className = 'photo-thumb-remove'; btn.title = 'Entfernen';
+  // An SVG cross, not the '&times;' glyph -- that character's own font metrics don't sit centered
+  // within its line box in most fonts, so it looks off-center inside a circle no matter how the
+  // button itself is centered (flexbox centers the *box*, not the glyph within it). Same fix as
+  // .modal-close already uses elsewhere in this file.
+  btn.innerHTML = '<svg width="10" height="10" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><line x1="1" y1="1" x2="13" y2="13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="13" y1="1" x2="1" y2="13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+  btn.onclick = function() { removePhoto(id); };
   div.appendChild(img); div.appendChild(btn); container.appendChild(div);
 }
 
@@ -1702,9 +1750,78 @@ function removePhoto(id) {
   var el = document.getElementById('thumb-' + id); if (el) el.remove();
 }
 
-function openLightbox(url) { document.getElementById('lightbox-img').src = url; document.getElementById('lightbox').classList.add('open'); }
-function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); }
-document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { closeLightbox(); closeDetailModal(); closeModal(); } });
+// ============================================================================================
+// Shared photo viewer (<dialog>) -- opened either read-only (detail view, mode 'view') or with a
+// working "Foto entfernen" action (upload preview, mode 'edit'; see openUploadPhotoViewer()).
+// photoViewerPhotos entries are { url } for view mode, { id, url } for edit mode -- the id is
+// what lets photoViewerRemoveCurrent() call the existing removePhoto().
+// ============================================================================================
+var photoViewerPhotos = [];
+var photoViewerIndex = 0;
+
+function openPhotoViewer(photos, startIndex, mode) {
+  photoViewerPhotos = photos;
+  photoViewerIndex = startIndex || 0;
+  var dialog = document.getElementById('photo-viewer');
+  dialog.classList.toggle('edit-mode', mode === 'edit');
+  renderPhotoViewer();
+  if (!dialog.open) dialog.showModal();
+}
+
+function openUploadPhotoViewer(id) {
+  var photos = pendingPhotos.map(function(p) { return { id: p.id, url: p.dataUrl }; });
+  var idx = photos.findIndex(function(p) { return p.id === id; });
+  openPhotoViewer(photos, idx < 0 ? 0 : idx, 'edit');
+}
+
+function closePhotoViewer() {
+  document.getElementById('photo-viewer').close();
+}
+
+function renderPhotoViewer() {
+  var photo = photoViewerPhotos[photoViewerIndex];
+  if (!photo) { closePhotoViewer(); return; }
+  document.getElementById('photo-viewer-img').src = photo.url;
+  document.getElementById('photo-viewer-prev').disabled = photoViewerIndex <= 0;
+  document.getElementById('photo-viewer-next').disabled = photoViewerIndex >= photoViewerPhotos.length - 1;
+  var counter = document.getElementById('photo-viewer-counter');
+  counter.classList.toggle('multi', photoViewerPhotos.length > 1);
+  counter.textContent = (photoViewerIndex + 1) + ' / ' + photoViewerPhotos.length;
+}
+
+function photoViewerStep(delta) {
+  var next = photoViewerIndex + delta;
+  if (next < 0 || next >= photoViewerPhotos.length) return;
+  photoViewerIndex = next;
+  renderPhotoViewer();
+}
+
+function photoViewerRemoveCurrent() {
+  var photo = photoViewerPhotos[photoViewerIndex];
+  if (!photo || photo.id == null) return;
+  removePhoto(photo.id);
+  photoViewerPhotos.splice(photoViewerIndex, 1);
+  if (photoViewerIndex >= photoViewerPhotos.length) photoViewerIndex = photoViewerPhotos.length - 1;
+  if (photoViewerPhotos.length === 0) { closePhotoViewer(); return; }
+  renderPhotoViewer();
+}
+
+document.getElementById('photo-viewer').addEventListener('click', function(e) {
+  if (e.target === this) this.close(); // click on the backdrop, not the image/controls
+});
+document.addEventListener('keydown', function(e) {
+  if (!document.getElementById('photo-viewer').open) return;
+  if (e.key === 'ArrowLeft') photoViewerStep(-1);
+  if (e.key === 'ArrowRight') photoViewerStep(1);
+});
+
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Escape') return;
+  // The <dialog> handles its own Escape (native top-layer) -- don't also close what's underneath.
+  if (document.getElementById('photo-viewer').open) return;
+  closeDetailModal();
+  closeModal();
+});
 
 function showFormError(msg) {
   var el = document.getElementById('form-error');
