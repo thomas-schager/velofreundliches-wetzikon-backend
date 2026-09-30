@@ -280,7 +280,7 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
 .captcha-input { width: 80px !important; flex-shrink: 0; text-align: center; font-family: var(--vw-font-body) !important; }
 
 .modal-actions { display: flex; gap: var(--space-2); margin-top: var(--space-5); }
-.btn { padding: var(--space-3) var(--space-5); min-height: 44px; border-radius: var(--vw-radius-sm); border: 1px solid transparent; cursor: pointer; font-family: var(--vw-font-body); font-size: var(--text-base); font-weight: 500; letter-spacing: 0.01em; transition: all 150ms var(--vw-ease); display: flex; align-items: center; justify-content: center; }
+.btn { padding: var(--space-3) var(--space-5); min-height: 44px; border-radius: var(--vw-radius-sm); border: 1px solid transparent; cursor: pointer; font-family: var(--vw-font-body); font-size: var(--text-base); font-weight: 500; letter-spacing: 0.01em; transition: all 150ms var(--vw-ease); display: flex; align-items: center; justify-content: center; gap: 8px; }
 .btn-primary { background: var(--vw-surface-2); color: var(--vw-muted); border-color: var(--vw-border); flex: 1; transition: background 200ms var(--vw-ease), color 200ms var(--vw-ease), border-color 200ms var(--vw-ease); }
 .btn-primary:hover { background: var(--vw-surface-2); }
 .btn-primary.ready { background: var(--vw-primary); color: #fff; border-color: transparent; }
@@ -288,9 +288,28 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
 .btn-primary.ready:active { background: var(--vw-primary-press); transform: translateY(1px); }
 .btn-ghost { background: transparent; color: var(--vw-dark); border-color: var(--vw-border-strong); }
 .btn-ghost:hover { background: var(--vw-surface-2); border-color: var(--vw-dark); }
+.btn:disabled { cursor: default; }
+.btn:disabled:not(.loading) { opacity: 0.55; }
+
+/* Submit spinner + real upload-progress bar -- see submitEntry()'s start/finishSubmitProgress().
+   The spinner (indeterminate, "still working") and the bar (determinate, "how far along") answer
+   different questions, so both run at once rather than one replacing the other. */
+.btn-spinner { display: none; flex-shrink: 0; animation: btn-spin 0.8s linear infinite; }
+.btn.loading .btn-spinner { display: inline-flex; }
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
+.submit-progress { display: none; height: 4px; border-radius: var(--vw-radius-full); background: var(--vw-border); overflow: hidden; margin-top: var(--space-3); }
+.submit-progress.active { display: block; }
+.submit-progress-fill { height: 100%; width: 0%; background: var(--vw-primary); border-radius: var(--vw-radius-full); transition: width 300ms var(--vw-ease); }
 
 .modal-close { position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; border-radius: var(--vw-radius-full); border: 1px solid var(--vw-border); background: var(--vw-surface); color: var(--vw-muted-strong); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background var(--vw-dur) var(--vw-ease), color var(--vw-dur) var(--vw-ease), border-color var(--vw-dur); z-index: 10; }
 .modal-close:hover { background: var(--vw-surface-2); color: var(--vw-dark); border-color: var(--vw-border-strong); }
+.modal-close:disabled { opacity: 0.55; cursor: default; pointer-events: none; }
+
+/* Frozen while a submission is in flight -- see setFormFrozen(). Everything in the form goes
+   inert except the action row/progress bar themselves, which already communicate "sending" on
+   their own (spinner, disabled state, progress fill) and would look broken dimmed along with it. */
+#modal-form-view.frozen > *:not(.modal-actions):not(.submit-progress) { opacity: 0.55; pointer-events: none; }
 .modal-title-row { display: flex; align-items: flex-start; padding-right: 40px; margin-bottom: 4px; }
 
 .preview-map-toggle { position: absolute; bottom: 8px; right: 8px; z-index: 1000; display: flex; border: 1px solid var(--vw-border-strong); border-radius: var(--vw-radius-sm); overflow: hidden; box-shadow: var(--vw-shadow-md); }
@@ -569,7 +588,7 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
           <label class="field-label" for="photo-input">Fotos <span class="field-optional">(optional)</span></label>
           <div class="upload-area" id="upload-area">
             <input type="file" id="photo-input" accept="image/*" multiple aria-label="Fotos auswählen" />
-            <div class="upload-hint" aria-hidden="true"><strong>Fotos auswählen</strong> oder hierher ziehen — JPG, PNG, WEBP, HEIC</div>
+            <div class="upload-hint" aria-hidden="true"><strong>Fotos auswählen</strong> oder hierher ziehen</div>
           </div>
           <div class="photo-previews" id="photo-previews" aria-label="Hochgeladene Fotos"></div>
         </div>
@@ -600,7 +619,13 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
 
         <div class="modal-actions">
           <button class="btn btn-ghost" onclick="requestCloseModal()" type="button">Abbrechen</button>
-          <button class="btn btn-primary" id="submit-btn" onclick="submitEntry()" type="button">Melden</button>
+          <button class="btn btn-primary" id="submit-btn" onclick="submitEntry()" type="button">
+            <svg class="btn-spinner" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="30 10"/></svg>
+            <span id="submit-btn-label">Melden</span>
+          </button>
+        </div>
+        <div class="submit-progress" id="submit-progress" aria-hidden="true">
+          <div class="submit-progress-fill" id="submit-progress-fill"></div>
         </div>
       </div>
 
@@ -1288,6 +1313,24 @@ var pendingLatLng = null;
 var selectedRating = null;
 var pendingPhotos = []; // [{id, dataUrl, file}]
 var challengeToken = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
+var formFrozen = false;
+
+// Locks the form while a submission is in flight (see submitEntry()) -- every input/button in
+// #modal-form-view goes inert, drag-and-drop onto the upload area is ignored, and requestCloseModal()
+// refuses to act (covers Esc and the backdrop click, which aren't native buttons and so aren't
+// touched by the disabled-attribute loop below). #submit-btn is skipped -- its own loading state
+// already manages disabled/label, and staying at full opacity is what makes it the visible target
+// of the scroll-into-view in submitEntry().
+function setFormFrozen(frozen) {
+  formFrozen = frozen;
+  var formView = document.getElementById('modal-form-view');
+  formView.querySelectorAll('input, textarea, button').forEach(function(el) {
+    if (el.id === 'submit-btn') return;
+    el.disabled = frozen;
+  });
+  document.querySelector('.modal-close').disabled = frozen;
+  formView.classList.toggle('frozen', frozen);
+}
 
 // Shown before any Bewertung is picked -- comment isn't gated on rating being selected first, so
 // this covers that state. Once a rating is chosen, selectRating() below swaps in one of these
@@ -1419,6 +1462,8 @@ function reverseGeocode(latlng) {
 }
 
 function openModal(latlng) {
+  setFormFrozen(false);
+  document.querySelector('.modal-left').scrollTop = 0;
   document.getElementById('modal-form-view').style.display = '';
   document.getElementById('modal-success-view').style.display = 'none';
   document.getElementById('form-error').classList.remove('visible');
@@ -1463,6 +1508,7 @@ document.getElementById('modal-overlay').addEventListener('click', function(e) {
 // there's unsaved comment text and/or photos -- but not once the success view is showing, since
 // the report has already been submitted and there's nothing left to lose.
 function requestCloseModal() {
+  if (formFrozen) return;
   if (!document.getElementById('modal-overlay').classList.contains('open')) { closeModal(); return; }
   if (document.getElementById('modal-success-view').style.display !== 'none') { closeModal(); return; }
   var hasComment = document.getElementById('comment-input').value.trim().length > 0;
@@ -1761,9 +1807,9 @@ function validateForm() {
 // velo-melder.html) and the raw File (needed to actually upload it, which that file never does).
 document.getElementById('photo-input').addEventListener('change', function(e) { handleFiles(e.target.files); });
 var ua = document.getElementById('upload-area');
-ua.addEventListener('dragover', function(e) { e.preventDefault(); this.classList.add('drag-over'); });
+ua.addEventListener('dragover', function(e) { e.preventDefault(); if (formFrozen) return; this.classList.add('drag-over'); });
 ua.addEventListener('dragleave', function() { this.classList.remove('drag-over'); });
-ua.addEventListener('drop', function(e) { e.preventDefault(); this.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+ua.addEventListener('drop', function(e) { e.preventDefault(); this.classList.remove('drag-over'); if (formFrozen) return; handleFiles(e.dataTransfer.files); });
 
 function handleFiles(files) {
   Array.from(files).forEach(function(file) {
@@ -1921,9 +1967,15 @@ function submitEntry() {
   if (!pendingLatLng) return;
 
   var btn = document.getElementById('submit-btn');
-  var originalText = btn.textContent;
-  btn.textContent = 'Wird gesendet…';
+  var label = document.getElementById('submit-btn-label');
+  var originalLabel = label.textContent;
+  label.textContent = 'Wird gesendet…';
+  btn.classList.add('loading');
   btn.disabled = true;
+  setFormFrozen(true);
+  startSubmitProgress();
+  var modalLeft = document.querySelector('.modal-left');
+  modalLeft.scrollTo({ top: modalLeft.scrollHeight, behavior: 'smooth' });
 
   var fd = new FormData();
   fd.append('lat', String(pendingLatLng.lat));
@@ -1935,17 +1987,38 @@ function submitEntry() {
   fd.append('captchaAnswer', document.getElementById('captcha-input').value.trim());
   pendingPhotos.forEach(function(p) { fd.append('photos[]', p.file); });
 
-  fetch(API_BASE + '/reports', {
-    method: 'POST',
-    headers: { 'X-Challenge-Token': challengeToken },
-    body: fd
-  }).then(function(res) {
-    return res.json().then(function(body) { return { ok: res.ok, body: body }; });
-  }).then(function(result) {
-    btn.textContent = originalText;
+  // XMLHttpRequest, not fetch() -- fetch has no upload-progress API (nothing reports how many
+  // bytes have actually reached the network), while xhr.upload's progress event gives real
+  // loaded/total byte counts, which is what drives the bar below.
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', API_BASE + '/reports');
+  xhr.setRequestHeader('X-Challenge-Token', challengeToken);
+  xhr.upload.addEventListener('progress', function(e) {
+    if (e.lengthComputable) setSubmitProgress(e.loaded / e.total * 100);
+  });
+  xhr.addEventListener('load', function() {
+    var ok = xhr.status >= 200 && xhr.status < 300;
+    var body = null;
+    try { body = JSON.parse(xhr.responseText); } catch (e) { /* leave body null */ }
+    finishSubmit(ok, body);
+  });
+  xhr.addEventListener('error', function() { finishSubmit(false, null, true); });
+  xhr.send(fd);
+
+  function finishSubmit(ok, body, networkError) {
+    label.textContent = originalLabel;
+    btn.classList.remove('loading');
     btn.disabled = false;
-    if (!result.ok) {
-      var details = result.body && result.body.details;
+    finishSubmitProgress(ok);
+
+    if (networkError) {
+      setFormFrozen(false);
+      showFormError('Verbindung zum Server fehlgeschlagen. Bitte versuche es erneut.');
+      return;
+    }
+    if (!ok) {
+      setFormFrozen(false);
+      var details = body && body.details;
       var otherDetails = details ? Object.keys(details).filter(function(k) { return k !== 'captchaAnswer'; }) : [];
       var msg;
       if (details && details.captchaAnswer) {
@@ -1956,7 +2029,7 @@ function submitEntry() {
         applyFieldState(document.getElementById('captcha-input'), false, 'hint-captcha');
         generateCaptcha();
       } else {
-        msg = result.body && result.body.message ? result.body.message : 'Die Meldung konnte nicht gesendet werden.';
+        msg = body && body.message ? body.message : 'Die Meldung konnte nicht gesendet werden.';
       }
       if (otherDetails.length) {
         msg += ' (' + otherDetails.map(function(k) { return k + ': ' + details[k]; }).join(', ') + ')';
@@ -1967,14 +2040,35 @@ function submitEntry() {
     document.getElementById('modal-form-view').style.display = 'none';
     document.getElementById('modal-success-view').style.display = '';
     document.querySelector('.modal-right').classList.add('pending-mode');
-    if (result.body && result.body.id) {
-      addPendingReport(result.body.id, pendingLatLng.lat, pendingLatLng.lng);
+    if (body && body.id) {
+      addPendingReport(body.id, pendingLatLng.lat, pendingLatLng.lng);
     }
-  }).catch(function() {
-    btn.textContent = originalText;
-    btn.disabled = false;
-    showFormError('Verbindung zum Server fehlgeschlagen. Bitte versuche es erneut.');
-  });
+  }
+}
+
+// Real progress, driven by xhr.upload's "progress" event in submitEntry() -- the bar reflects
+// actual bytes sent, not a guess. If the browser can't report a length (e.lengthComputable
+// false; rare for a FormData body), the bar just stays at 0% until finishSubmitProgress() snaps
+// it -- still correct, just less informative for that one request.
+function startSubmitProgress() {
+  var bar = document.getElementById('submit-progress');
+  var fill = document.getElementById('submit-progress-fill');
+  bar.classList.add('active');
+  fill.style.width = '0%';
+}
+function setSubmitProgress(pct) {
+  document.getElementById('submit-progress-fill').style.width = Math.max(0, Math.min(100, pct)) + '%';
+}
+function finishSubmitProgress(ok) {
+  var bar = document.getElementById('submit-progress');
+  var fill = document.getElementById('submit-progress-fill');
+  if (ok) {
+    fill.style.width = '100%';
+    setTimeout(function() { bar.classList.remove('active'); fill.style.width = '0%'; }, 350);
+  } else {
+    bar.classList.remove('active');
+    fill.style.width = '0%';
+  }
 }
 
 function showToast(msg) {
