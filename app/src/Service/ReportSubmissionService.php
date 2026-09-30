@@ -12,6 +12,7 @@ use DateInterval;
 use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
+use RuntimeException;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
@@ -37,6 +38,7 @@ class ReportSubmissionService
         private readonly RouterInterface $router,
         private readonly MailerInterface $mailer,
         private readonly CaptchaChallengeService $captcha,
+        private readonly PhotoConversionService $photoConverter,
         private readonly string $uploadsDir,
     ) {
     }
@@ -78,6 +80,19 @@ class ReportSubmissionService
             $errors['captchaAnswer'] = 'incorrect or expired, request a new challenge via GET /reports/challenge';
         }
 
+        // Converted here, before the report is ever persisted, so a corrupt/unreadable photo
+        // fails validation cleanly instead of leaving behind a Report row with no photos.
+        $photoBlobs = [];
+        if (count($photos) <= self::MAX_PHOTOS) {
+            foreach ($photos as $photo) {
+                try {
+                    $photoBlobs[] = $this->photoConverter->convertToWebp($photo->getPathname());
+                } catch (RuntimeException) {
+                    $errors['photos'] = 'one or more photos could not be read as an image';
+                }
+            }
+        }
+
         if ($errors !== []) {
             throw new ValidationException('Request body failed validation.', $errors);
         }
@@ -97,7 +112,7 @@ class ReportSubmissionService
         $this->em->persist($report);
         $this->em->flush(); // need the generated id for the upload path below
 
-        $this->storePhotos($report, $photos);
+        $this->storePhotos($report, $photoBlobs);
         $this->em->flush();
 
         $confirmUrl = $this->router->generate('api_reports_confirm', ['token' => $report->getConfirmationToken()], UrlGeneratorInterface::ABSOLUTE_URL);
@@ -147,10 +162,10 @@ class ReportSubmissionService
         return $report;
     }
 
-    /** @param UploadedFile[] $photos */
-    private function storePhotos(Report $report, array $photos): void
+    /** @param string[] $photoBlobs WebP-encoded image data, already converted via PhotoConversionService */
+    private function storePhotos(Report $report, array $photoBlobs): void
     {
-        if ($photos === []) {
+        if ($photoBlobs === []) {
             return;
         }
 
@@ -158,9 +173,9 @@ class ReportSubmissionService
         $targetDir = $this->uploadsDir . '/reports/' . $report->getId();
         $fs->mkdir($targetDir);
 
-        foreach (array_values($photos) as $i => $file) {
-            $filename = bin2hex(random_bytes(8)) . '.' . strtolower($file->guessExtension() ?: 'jpg');
-            $file->move($targetDir, $filename);
+        foreach (array_values($photoBlobs) as $i => $blob) {
+            $filename = bin2hex(random_bytes(8)) . '.webp';
+            $fs->dumpFile($targetDir . '/' . $filename, $blob);
 
             $photo = new ReportPhoto();
             $photo->setUrl('/uploads/reports/' . $report->getId() . '/' . $filename)
