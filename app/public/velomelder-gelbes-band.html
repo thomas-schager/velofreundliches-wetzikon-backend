@@ -105,16 +105,22 @@ header {
 @media (min-width: 720px) { .header-hint { display: block; } }
 
 /* Map chrome */
+/* Matches the documented .map-toggle/.map-toggle-btn reference in
+   VeloWetzikon_Design_Tokens/design-system/map.html (#container) -- small radius (not a full
+   pill), strong border, divider between buttons, 44px tap targets, hover on the inactive button. */
 .map-toggle {
   position: absolute; top: 68px; right: 12px; z-index: 900;
-  display: flex; background: var(--vw-surface); border-radius: var(--vw-radius-full);
-  box-shadow: var(--vw-shadow-md); overflow: hidden; border: 1px solid var(--vw-border);
+  display: flex; border: 1px solid var(--vw-border-strong); border-radius: var(--vw-radius-sm);
+  overflow: hidden; box-shadow: var(--vw-shadow-md);
 }
 .map-toggle button {
-  border: none; background: transparent; padding: 7px 14px; font: 500 var(--text-xs) var(--vw-font-body);
-  color: var(--vw-muted-strong); cursor: pointer;
+  border: none; background: var(--vw-surface); padding: 11px 14px; min-height: 44px;
+  font: 500 var(--text-xs) var(--vw-font-body); color: var(--vw-muted-strong); cursor: pointer;
+  white-space: nowrap; transition: background var(--vw-dur) var(--vw-ease), color var(--vw-dur) var(--vw-ease);
 }
+.map-toggle button + button { border-left: 1px solid var(--vw-border); }
 .map-toggle button.active { background: var(--vw-dark); color: #fff; }
+.map-toggle button:hover:not(.active) { background: var(--vw-surface-2); color: var(--vw-dark); }
 
 /* ============================================================================================
    FORM/MODAL -- ported from velo-melder.html verbatim (see that file's "Meldung einreichen"
@@ -287,8 +293,8 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
 .modal-close:hover { background: var(--vw-surface-2); color: var(--vw-dark); border-color: var(--vw-border-strong); }
 .modal-title-row { display: flex; align-items: flex-start; padding-right: 40px; margin-bottom: 4px; }
 
-.preview-map-toggle { position: absolute; bottom: 8px; right: 8px; z-index: 1000; display: flex; border: 1px solid var(--vw-border-strong); border-radius: var(--vw-radius-sm); overflow: hidden; box-shadow: var(--vw-shadow-sm); }
-.preview-toggle-btn { padding: 8px var(--space-3); min-height: 36px; font-family: var(--vw-font-body); font-size: var(--text-xs); font-weight: 500; background: rgba(255,255,255,0.92); color: var(--vw-muted-strong); border: none; cursor: pointer; white-space: nowrap; transition: background var(--vw-dur) var(--vw-ease), color var(--vw-dur) var(--vw-ease); }
+.preview-map-toggle { position: absolute; bottom: 8px; right: 8px; z-index: 1000; display: flex; border: 1px solid var(--vw-border-strong); border-radius: var(--vw-radius-sm); overflow: hidden; box-shadow: var(--vw-shadow-md); }
+.preview-toggle-btn { padding: 11px 14px; min-height: 44px; font-family: var(--vw-font-body); font-size: var(--text-xs); font-weight: 500; background: var(--vw-surface); color: var(--vw-muted-strong); border: none; cursor: pointer; white-space: nowrap; transition: background var(--vw-dur) var(--vw-ease), color var(--vw-dur) var(--vw-ease); }
 .preview-toggle-btn + .preview-toggle-btn { border-left: 1px solid var(--vw-border); }
 .preview-toggle-btn.active { background: var(--vw-dark); color: #fff; }
 .preview-toggle-btn:hover:not(.active) { background: var(--vw-surface-2); color: var(--vw-dark); }
@@ -379,7 +385,7 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
 .map-expand-toggle svg { transition: transform 320ms var(--vw-ease); }
 .map-expand-toggle.expanded svg { transform: rotate(180deg); }
 
-/* Reuses .preview-map-toggle/.preview-toggle-btn's pill styling (already defined below for the
+/* Reuses .preview-map-toggle/.preview-toggle-btn's styling (already defined below for the
    submit form's location-preview maps) -- hidden by default, shown only while expanded (see
    toggleDetailMapExpanded()), since street/satellite switching is pointless chrome on the
    compact "glance" map. */
@@ -497,7 +503,7 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
 
       <div id="modal-form-view">
         <div class="modal-title-row">
-          <h2 class="modal-title" id="modal-title">Meldung einreichen</h2>
+          <h2 class="modal-title" id="modal-title">Feedback zum gelben Band</h2>
         </div>
         <div class="modal-coords" id="modal-coords" aria-label="Koordinaten"></div>
         <div class="address-row">
