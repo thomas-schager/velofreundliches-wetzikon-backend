@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+{#
+  VeloMelder report-confirmation e-mail. Sent from ReportSubmissionService::submit() via a
+  TemplatedEmail (htmlTemplate + textTemplate, see report_confirmation.txt.twig). Built on the
+  canonical bulletproof-table structure documented in VeloWetzikon_Design_Tokens/design-system/
+  email.html / email-template.html -- trimmed to only the blocks this specific e-mail needs
+  (logo, paragraphs, one primary button, footer -- no secondary button/lists/content image, since
+  none of those fit a confirmation e-mail honestly). Keep both in sync if the template's structure
+  changes; don't let this drift into its own one-off pattern.
+
+  Logo URL: {{ absolute_url(asset(...)) }}, not a config parameter -- this runs inside the POST
+  /reports HTTP request, so the current request's own scheme+host (test-backend vs backend) is
+  already correct, exactly like confirmUrl's UrlGeneratorInterface::ABSOLUTE_URL below in
+  ReportSubmissionService. No new environment-specific setting needed.
+#}
+<html lang="de" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Velofreundliches Wetzikon</title>
+<!--[if mso]>
+<noscript>
+<xml>
+<o:OfficeDocumentSettings>
+<o:PixelsPerInch>96</o:PixelsPerInch>
+</o:OfficeDocumentSettings>
+</xml>
+</noscript>
+<style>
+  table { border-collapse: collapse; }
+  td, a, body { font-family: Roboto, Helvetica, Arial, sans-serif !important; }
+</style>
+<![endif]-->
+<style>
+  body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+  table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+  img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
+  body { margin: 0; padding: 0; width: 100% !important; background: #fafaf8; }
+  a { color: #dc3406; }
+  @media screen and (max-width: 600px) {
+    .email-container { width: 100% !important; }
+    .email-padded { padding-left: 20px !important; padding-right: 20px !important; }
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background:#fafaf8;">
+
+{#- UTM-tagged links back to the public site (logo, Impressum) -- utm_content is the only part
+    that varies per link, so the shared source/medium/campaign live in one place. Not used in
+    report_confirmation.txt.twig: the plain-text part shows the raw URL in full, and a
+    query-string-laden link reads as clutter/looks suspicious there in a way it doesn't as a
+    hyperlink's invisible href in HTML. If this e-mail's campaign ever needs to differ from
+    another e-mail's, change utmCampaign here, not inline at each href. -#}
+{%- set utmCampaign = 'meldung_bestaetigung' -%}
+{%- set siteUtmBase = 'utm_source=velomelder&utm_medium=email&utm_campaign=' ~ utmCampaign -%}
+
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#fafaf8;">
+  {#- Deliberately doesn't repeat "bestätigen" (already in the subject, visible right next to this
+      in the inbox list) -- tells the reader something new instead: whose turn it is, and roughly
+      where. addressPhrase already picks "bei X" vs "in der Nähe von X" (see
+      ReportSubmissionService::addressPhraseForEmail()); reused as-is so both read correctly. -#}
+  {{- addressPhrase ? 'Deine Meldung ' ~ addressPhrase ~ ' wartet auf dich.' : 'Deine Meldung wartet auf dich.' -}}
+</div>
+
+<center style="width:100%;background:#fafaf8;">
+<!--[if mso]>
+<table role="presentation" width="600" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td>
+<![endif]-->
+<table role="presentation" class="email-container" align="center" width="600" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;max-width:600px;width:100%;">
+
+  <tr>
+    <td class="email-padded" style="padding:32px 32px 24px;" align="left">
+      <a href="https://velofreundliches-wetzikon.ch/?{{ siteUtmBase }}&amp;utm_content=logo" target="_blank">
+        <img src="{{ absolute_url(asset('assets/email/logo.png')) }}" width="168" height="29" alt="Velofreundliches Wetzikon" style="display:block;border:0;outline:none;text-decoration:none;max-width:168px;" />
+      </a>
+    </td>
+  </tr>
+
+  <tr>
+    <td style="background:#ffffff;border:1px solid #e8e6e0;border-radius:8px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td class="email-padded" style="padding:40px 40px 32px;">
+
+            {# name/addressPhrase/ratingLabel: see ReportSubmissionService::submit() -- all three
+               are null-safe (anonymous report, un-geocodable location, or a missing rating row
+               that can't actually happen given the 1-5 validation, but the template doesn't
+               assume it). addressPhrase is a ready-to-embed phrase ("bei X"/"in der Nähe von X"),
+               not a bare address -- the two cases need different connecting words.
+
+               Built via {% set %} + a single {{ }} print, not inline {% if %} block tags --
+               Twig silently eats the newline immediately after every block tag by default, which
+               makes exact whitespace (blank lines in report_confirmation.txt.twig) fragile to get
+               right with inline if/else. A {{ }} print tag has no such behavior. #}
+            {%- set ratingSuffix = ratingLabel ? ' (Bewertung: ' ~ ratingLabel ~ ')' : '' -%}
+            {%- set thanksSentence = addressPhrase
+                ? 'vielen Dank für deine Meldung zur Stelle ' ~ addressPhrase ~ ratingSuffix ~ '.'
+                : 'vielen Dank für deine Meldung zu einer von dir gemeldeten Stelle' ~ ratingSuffix ~ '.'
+            -%}
+            <p style="margin:0 0 16px;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#000000;">
+              Hallo{% if name %} {{ name }}{% endif %},<br><br>
+              {{ thanksSentence }}
+            </p>
+            <p style="margin:0 0 24px;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#000000;">
+              Bitte bestätige deine Meldung über den Button unten &ndash; anschliessend wird sie geprüft und veröffentlicht.
+            </p>
+
+            <!-- Primary button -- bulletproof VML+HTML pattern, see email.html#buttons for the
+                 arcsize math (4px radius at 44px height -> 18%). -->
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
+              <tr>
+                <td>
+                  <!--[if mso]>
+                  <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{ confirmUrl }}" style="height:44px;v-text-anchor:middle;width:220px;" arcsize="18%" stroke="f" fillcolor="#dc3406">
+                  <w:anchorlock/>
+                  <center style="color:#ffffff;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:500;letter-spacing:0.01em;">Meldung bestätigen</center>
+                  </v:roundrect>
+                  <![endif]-->
+                  <!--[if !mso]><!-->
+                  <a href="{{ confirmUrl }}" target="_blank" style="background-color:#dc3406;border-radius:4px;color:#ffffff;display:inline-block;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:500;letter-spacing:0.01em;line-height:44px;text-align:center;text-decoration:none;width:220px;-webkit-text-size-adjust:none;mso-hide:all;">Meldung bestätigen</a>
+                  <!--<![endif]-->
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0 0 24px;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;color:#5e5e5a;">
+              Der Link ist {{ ttlHours }} Stunden gültig. Falls du diese Meldung nicht abgeschickt hast, kannst du diese E-Mail einfach ignorieren &ndash; ohne Bestätigung wird nichts veröffentlicht.
+            </p>
+
+            <p style="margin:0 0 16px;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#000000;">
+              Danke, dass du Wetzikon velofreundlicher machst.
+            </p>
+
+            <p style="margin:0;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#000000;">
+              Dein Team von<br>Velofreundliches Wetzikon
+            </p>
+
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <tr>
+    <td class="email-padded" style="padding:24px 32px 40px;text-align:center;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#8a8a86;">
+      Velofreundliches Wetzikon &mdash; private Initiative<br>
+      Thom Hoffmann &middot; Messikommerstrasse 37 &middot; 8620 Wetzikon<br>
+      <a href="https://velofreundliches-wetzikon.ch/impressum-editor/?{{ siteUtmBase }}&amp;utm_content=impressum" style="color:#8a8a86;text-decoration:underline;">Impressum</a>
+    </td>
+  </tr>
+
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</center>
+</body>
+</html>

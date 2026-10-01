@@ -4,6 +4,7 @@ namespace App\Service;
 
 use App\Entity\Report;
 use App\Entity\ReportPhoto;
+use App\Repository\RatingRepository;
 use App\Repository\ReportRepository;
 use App\Service\Exception\ExpiredChallengeException;
 use App\Service\Exception\ReportNotFoundException;
@@ -13,11 +14,12 @@ use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use RuntimeException;
+use Symfony\Bridge\Twig\Mime\TemplatedEmail;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Symfony\Component\Mailer\MailerInterface;
-use Symfony\Component\Mime\Email;
+use Symfony\Component\Mime\Address;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Component\Routing\RouterInterface;
 
@@ -33,6 +35,7 @@ class ReportSubmissionService
 
     public function __construct(
         private readonly ReportRepository $reports,
+        private readonly RatingRepository $ratings,
         private readonly EntityManagerInterface $em,
         private readonly LoggerInterface $logger,
         private readonly RouterInterface $router,
@@ -44,7 +47,7 @@ class ReportSubmissionService
     }
 
     /**
-     * @param array{lat: mixed, lng: mixed, rating: mixed, comment: mixed, name?: mixed, email: mixed, captchaAnswer?: mixed} $data
+     * @param array{lat: mixed, lng: mixed, rating: mixed, comment: mixed, name?: mixed, email: mixed, address?: mixed, addressDistanceM?: mixed, captchaAnswer?: mixed} $data
      * @param UploadedFile[] $photos
      */
     public function submit(array $data, array $photos, ?string $challengeToken): Report
@@ -57,6 +60,13 @@ class ReportSubmissionService
         $comment = trim((string) ($data['comment'] ?? ''));
         $name = trim((string) ($data['name'] ?? ''));
         $email = trim((string) ($data['email'] ?? ''));
+        // Already resolved client-side (same reverse-geocoding call that drives the "Adresse"
+        // preview text) -- not re-validated against a geocoder here, it's personalization-only
+        // (e-mail copy), never used for anything security- or business-logic-relevant.
+        $address = trim((string) ($data['address'] ?? ''));
+        $address = $address !== '' ? mb_substr($address, 0, 255) : null;
+        $addressDistanceM = filter_var($data['addressDistanceM'] ?? null, FILTER_VALIDATE_FLOAT);
+        $addressDistanceM = $addressDistanceM !== false ? $addressDistanceM : null; // false, not 0.0, if absent/invalid -- keep a real 0m distance intact
 
         if ($lat === false) {
             $errors['lat'] = 'required';
@@ -104,6 +114,8 @@ class ReportSubmissionService
             ->setComment($comment)
             ->setName($name !== '' ? $name : null)
             ->setAnonymous($name === '')
+            ->setAddress($address)
+            ->setAddressDistanceM($addressDistanceM)
             ->setEmail($email)
             ->setStatus(Report::STATUS_PENDING_EMAIL_CONFIRMATION)
             ->setConfirmationToken(bin2hex(random_bytes(32)))
@@ -123,23 +135,45 @@ class ReportSubmissionService
         ]);
 
         try {
-            $this->mailer->send((new Email())
-                ->from('notifications@velofreundliches-wetzikon.ch')
+            $this->mailer->send((new TemplatedEmail())
+                ->from(new Address('notifications@velofreundliches-wetzikon.ch', 'Velofreundliches Wetzikon'))
                 ->to($email)
-                ->subject('Bitte bestätige deine VeloMelder-Meldung')
-                ->text(
-                    "Vielen Dank für deine Meldung bei VeloMelder.\n\n"
-                    . "Damit sie geprüft und veröffentlicht werden kann, bestätige bitte deine E-Mail-Adresse:\n"
-                    . "{$confirmUrl}\n\n"
-                    . "Der Link ist " . self::CONFIRMATION_TTL_HOURS . " Stunden gültig. Falls du diese Meldung nicht "
-                    . "abgeschickt hast, kannst du diese E-Mail ignorieren -- ohne Bestätigung wird nichts veröffentlicht.\n\n"
-                    . "Velofreundliches Wetzikon"
-                ));
+                ->subject('Bitte bestätige deine Meldung bei Velofreundliches Wetzikon')
+                ->htmlTemplate('emails/report_confirmation.html.twig')
+                ->textTemplate('emails/report_confirmation.txt.twig')
+                ->context([
+                    'confirmUrl' => $confirmUrl,
+                    'ttlHours' => self::CONFIRMATION_TTL_HOURS,
+                    'name' => $report->getName(),
+                    'addressPhrase' => $this->addressPhraseForEmail($address, $addressDistanceM),
+                    'ratingLabel' => $this->ratings->find((int) $rating)?->getLabel(),
+                ]));
         } catch (TransportExceptionInterface $e) {
             $this->logger->warning('Could not send confirmation email', ['exception' => $e->getMessage()]);
         }
 
         return $report;
+    }
+
+    /**
+     * Same 20m/50m thresholds as the frontend's formatAddressLabel() (velomelder-gelbes-band.html)
+     * -- keep both in sync if the thresholds ever change. Returns a ready-to-embed prepositional
+     * phrase ("bei X" / "in der Nähe von X"), not a bare label, since the two cases need different
+     * connecting words when dropped into "...Meldung {phrase}..." in the e-mail template.
+     */
+    private function addressPhraseForEmail(?string $address, ?float $distanceM): ?string
+    {
+        if ($address === null || $distanceM === null) {
+            return null;
+        }
+        if ($distanceM <= 20) {
+            return 'bei ' . $address;
+        }
+        if ($distanceM <= 50) {
+            return 'in der Nähe von ' . $address;
+        }
+
+        return null;
     }
 
     public function confirmEmail(string $token): Report

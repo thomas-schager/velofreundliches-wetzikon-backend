@@ -1,0 +1,27 @@
+{%- set ratingSuffix = ratingLabel ? ' (Bewertung: ' ~ ratingLabel ~ ')' : '' -%}
+{%- set thanksSentence = addressPhrase
+    ? 'vielen Dank für deine Meldung zur Stelle ' ~ addressPhrase ~ ratingSuffix ~ '.'
+    : 'vielen Dank für deine Meldung zu einer von dir gemeldeten Stelle' ~ ratingSuffix ~ '.'
+-%}
+Hallo{% if name %} {{ name }}{% endif %},
+
+{{ thanksSentence }}
+
+Bitte bestätige deine Meldung über den Link unten -- anschliessend wird sie geprüft und veröffentlicht:
+{{ confirmUrl }}
+
+Der Link ist {{ ttlHours }} Stunden gültig. Falls du diese Meldung nicht abgeschickt hast, kannst du diese E-Mail ignorieren -- ohne Bestätigung wird nichts veröffentlicht.
+
+Danke, dass du Wetzikon velofreundlicher machst.
+
+
+Dein Team von
+Velofreundliches Wetzikon
+
+
+
+--
+Velofreundliches Wetzikon
+Private Initiative
+Thom Hoffmann, Messikommerstrasse 37, 8620 Wetzikon
+Impressum: https://velofreundliches-wetzikon.ch/impressum-editor/

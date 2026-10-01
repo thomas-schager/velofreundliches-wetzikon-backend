@@ -2044,6 +2044,11 @@ function submitEntry() {
       showFormError(msg);
       return;
     }
+    // Unfreeze here too -- the submission is no longer "in flight" once we have an outcome, and
+    // the X button/Esc/backdrop-click all route through requestCloseModal(), which no-ops while
+    // frozen. Leaving it frozen after success made those permanently unresponsive on the success
+    // view, even though closeModal() (the success view's own "Schliessen" button) worked fine.
+    setFormFrozen(false);
     document.getElementById('modal-form-view').style.display = 'none';
     document.getElementById('modal-success-view').style.display = '';
     document.querySelector('.modal-right').classList.add('pending-mode');
