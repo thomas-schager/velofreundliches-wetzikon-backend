@@ -1984,6 +1984,13 @@ function submitEntry() {
   fd.append('comment', comment);
   if (nameVal) fd.append('name', nameVal);
   fd.append('email', emailVal);
+  // Already resolved for the "Adresse wird geladen..." preview text above the form -- sent along
+  // so the backend can personalize the confirmation e-mail ("...Meldung bei <Adresse>...")
+  // instead of re-geocoding server-side for the same result.
+  if (lastGeocodedAddress) {
+    fd.append('address', lastGeocodedAddress);
+    if (lastGeocodedDistanceM != null) fd.append('addressDistanceM', String(lastGeocodedDistanceM));
+  }
   fd.append('captchaAnswer', document.getElementById('captcha-input').value.trim());
   pendingPhotos.forEach(function(p) { fd.append('photos[]', p.file); });
 
