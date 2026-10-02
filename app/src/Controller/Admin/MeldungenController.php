@@ -5,6 +5,7 @@ namespace App\Controller\Admin;
 use App\Entity\Report;
 use App\Repository\RatingRepository;
 use App\Repository\ReportRepository;
+use App\Repository\ReportSourceRepository;
 use App\Service\Exception\ReportNotFoundException;
 use App\Service\ReportPresenter;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -24,16 +25,20 @@ class MeldungenController extends AbstractController
     public function __construct(
         private readonly ReportRepository $reports,
         private readonly RatingRepository $ratings,
+        private readonly ReportSourceRepository $sources,
     ) {
     }
 
     #[Route('/meldungen', name: 'admin_meldungen', methods: ['GET'])]
     public function list(Request $request): Response
     {
+        $allowed = [Report::STATUS_PENDING_REVIEW, Report::STATUS_PUBLISHED, Report::STATUS_PENDING_EMAIL_CONFIRMATION, Report::STATUS_DECLINED];
         $status = $request->query->get('status');
-        $allowed = [Report::STATUS_PENDING_EMAIL_CONFIRMATION, Report::STATUS_PENDING_REVIEW, Report::STATUS_PUBLISHED, Report::STATUS_DECLINED];
-        if ($status !== null && !in_array($status, $allowed, true)) {
-            $status = null;
+        if (!in_array($status, $allowed, true)) {
+            // No "Alle" view anymore -- every tab is a single status, so the bare /meldungen
+            // link (sidebar nav, no query string) needs its own default rather than showing
+            // everything. "Neu" is the first tab and the one actually requiring action.
+            $status = Report::STATUS_PENDING_REVIEW;
         }
 
         $result = $this->reports->findForAdmin($status, 1, 200);
@@ -43,6 +48,11 @@ class MeldungenController extends AbstractController
             $ratingLabels[$rating->getRating()] = $rating->getLabel();
         }
 
+        $sourceLabels = [];
+        foreach ($this->sources->findAllOrdered() as $source) {
+            $sourceLabels[$source->getKey()] = $source->getLabel();
+        }
+
         return $this->render('admin/meldungen.html.twig', [
             'nav_page' => 'meldungen',
             'pending_count' => $this->reports->countByStatus(Report::STATUS_PENDING_REVIEW),
@@ -50,10 +60,11 @@ class MeldungenController extends AbstractController
             'total' => $result['total'],
             'current_status' => $status,
             'rating_labels' => $ratingLabels,
+            'source_labels' => $sourceLabels,
             'counts' => [
-                'all' => $this->reports->count([]),
                 'pending_review' => $this->reports->countByStatus(Report::STATUS_PENDING_REVIEW),
                 'published' => $this->reports->countByStatus(Report::STATUS_PUBLISHED),
+                'pending_email_confirmation' => $this->reports->countByStatus(Report::STATUS_PENDING_EMAIL_CONFIRMATION),
                 'declined' => $this->reports->countByStatus(Report::STATUS_DECLINED),
             ],
         ]);
@@ -75,6 +86,11 @@ class MeldungenController extends AbstractController
             $ratingColors[$rating->getRating()] = $rating->getColor();
         }
 
+        $sourceLabels = [];
+        foreach ($this->sources->findAllOrdered() as $source) {
+            $sourceLabels[$source->getKey()] = $source->getLabel();
+        }
+
         return $this->render('admin/meldung_detail.html.twig', [
             'nav_page' => 'meldungen',
             'pending_count' => $this->reports->countByStatus(Report::STATUS_PENDING_REVIEW),
@@ -82,6 +98,7 @@ class MeldungenController extends AbstractController
             'report_id' => ReportPresenter::formatId($report->getId()),
             'rating_labels' => $ratingLabels,
             'rating_colors' => $ratingColors,
+            'source_labels' => $sourceLabels,
         ]);
     }
 }

@@ -14,9 +14,9 @@
   <div class="adm-table-wrap">
     <div class="adm-toolbar">
       <div class="adm-filter-tabs" id="filterTabs">
-        <a class="adm-filter-tab {{ current_status is null ? 'is-active' : '' }}" href="{{ path('admin_meldungen') }}">Alle <span style="color:var(--color-muted);">{{ counts.all }}</span></a>
         <a class="adm-filter-tab {{ current_status == 'pending_review' ? 'is-active' : '' }}" href="{{ path('admin_meldungen') }}?status=pending_review">Neu <span style="color:var(--color-muted);">{{ counts.pending_review }}</span></a>
         <a class="adm-filter-tab {{ current_status == 'published' ? 'is-active' : '' }}" href="{{ path('admin_meldungen') }}?status=published">Veröffentlicht <span style="color:var(--color-muted);">{{ counts.published }}</span></a>
+        <a class="adm-filter-tab {{ current_status == 'pending_email_confirmation' ? 'is-active' : '' }}" href="{{ path('admin_meldungen') }}?status=pending_email_confirmation">E-Mail nicht bestätigt <span style="color:var(--color-muted);">{{ counts.pending_email_confirmation }}</span></a>
         <a class="adm-filter-tab {{ current_status == 'declined' ? 'is-active' : '' }}" href="{{ path('admin_meldungen') }}?status=declined">Abgelehnt <span style="color:var(--color-muted);">{{ counts.declined }}</span></a>
       </div>
       <span class="adm-toolbar__spacer"></span>
@@ -27,38 +27,38 @@
         <tr>
           <th>Bewertung</th>
           <th>Meldung</th>
+          <th>Fotos</th>
           <th>Adresse</th>
           <th>Von</th>
+          <th>Quelle</th>
           <th>Eingegangen</th>
-          <th>Status</th>
         </tr>
       </thead>
       <tbody>
         {% for r in items %}
+        {% set comment_flat = r.comment|replace({"\r\n": ' ', "\n": ' ', "\r": ' '}) %}
         <tr class="adm-table-row--link" onclick="location.href='{{ path('admin_meldung_detail', {id: report_id(r.id)}) }}'">
-          <td><span class="adm-rate-pill" data-r="{{ r.rating }}">{{ r.rating }} · {{ rating_labels[r.rating]|default(r.rating) }}</span></td>
-          <td class="adm-td-comment">{{ r.comment|length > 140 ? r.comment|slice(0, 140) ~ '…' : r.comment }}</td>
-          <td class="adm-td-muted">{{ r.address ?: '—' }}</td>
-          <td>
-            <span class="adm-td-name">
-              {% if r.anonymous %}<span class="adm-badge adm-badge--anon">Anonym</span>{% else %}{{ r.name }}{% endif %}
-            </span>
-          </td>
-          <td class="adm-td-muted">{{ r.createdAt|relative_de }}</td>
-          <td>
-            {% if r.status == 'published' %}
-              <span class="adm-badge adm-badge--published"><span class="adm-badge__dot"></span>Veröffentlicht</span>
-            {% elseif r.status == 'declined' %}
-              <span class="adm-badge adm-badge--declined"><span class="adm-badge__dot"></span>Abgelehnt</span>
-            {% elseif r.status == 'pending_review' %}
-              <span class="adm-badge adm-badge--new"><span class="adm-badge__dot"></span>Neu</span>
+          <td><span class="adm-rate-pill" data-r="{{ r.rating }}">{{ rating_labels[r.rating]|default(r.rating) }}</span></td>
+          <td class="adm-td-comment">{{ comment_flat|length > 140 ? comment_flat|slice(0, 140) ~ '…' : comment_flat }}</td>
+          <td class="adm-td-muted">
+            {% if r.photos|length > 0 %}
+              <i data-lucide="image" width="14" height="14"></i> {{ r.photos|length }}
             {% else %}
-              <span class="adm-badge"><span class="adm-badge__dot"></span>Ausstehend (E-Mail)</span>
+              —
             {% endif %}
           </td>
+          <td class="adm-td-muted">{{ r.address ?: '—' }}</td>
+          <td>
+            <div class="adm-td-name">
+              {% if r.anonymous %}<span class="adm-badge adm-badge--anon">Anonym</span>{% else %}{{ r.name }}{% endif %}
+            </div>
+            <div class="adm-td-muted">{{ r.email }}</div>
+          </td>
+          <td class="adm-td-muted">{{ source_labels[r.source]|default('—') }}</td>
+          <td class="adm-td-muted">{{ r.createdAt|relative_de }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="6" style="text-align:center;color:var(--color-muted);padding:32px;">Keine Meldungen in dieser Ansicht.</td></tr>
+        <tr><td colspan="7" style="text-align:center;color:var(--color-muted);padding:32px;">Keine Meldungen in dieser Ansicht.</td></tr>
         {% endfor %}
       </tbody>
     </table>

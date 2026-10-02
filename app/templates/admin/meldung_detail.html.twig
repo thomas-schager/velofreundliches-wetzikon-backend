@@ -95,6 +95,7 @@
         <div class="adm-kv">
           <div class="adm-kv__row"><span class="adm-kv__label">ID</span><span class="adm-kv__value adm-kv__value--mono">{{ report_id }}</span></div>
           <div class="adm-kv__row"><span class="adm-kv__label">Koordinaten</span><span class="adm-kv__value adm-kv__value--mono" id="kvLatLng">{{ report.lat }}, {{ report.lng }}</span></div>
+          <div class="adm-kv__row"><span class="adm-kv__label">Quelle</span><span class="adm-kv__value">{{ source_labels[report.source]|default('—') }}</span></div>
           <div class="adm-kv__row"><span class="adm-kv__label">Adresse (geokodiert)</span><span class="adm-kv__value">{{ report.address ?: '—' }}</span></div>
           <div class="adm-kv__row"><span class="adm-kv__label">Distanz zur Adresse</span><span class="adm-kv__value">{{ report.addressDistanceM is not null ? report.addressDistanceM ~ ' m' : '—' }}</span></div>
           <div class="adm-kv__row"><span class="adm-kv__label">E-Mail (intern)</span><span class="adm-kv__value adm-kv__value--email">{{ report.email }}{% if report.emailConfirmed %} <i data-lucide="check-circle" width="13" height="13" style="color:var(--color-success);"></i>{% endif %}</span></div>

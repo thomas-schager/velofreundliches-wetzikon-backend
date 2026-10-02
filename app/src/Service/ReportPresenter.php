@@ -52,6 +52,7 @@ class ReportPresenter
             // AdminReport shows the real name/photos regardless of the anonymous flag -- the
             // admin UI needs to see and edit what "anonymous" is hiding from the public view.
             'name' => $report->getName(),
+            'source' => $report->getSource(),
             'email' => $report->getEmail(),
             'emailConfirmed' => $report->isEmailConfirmed(),
             'status' => $report->getStatus(),

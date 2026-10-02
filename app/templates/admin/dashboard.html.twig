@@ -23,11 +23,6 @@
       <a class="adm-stat-card__link" href="{{ path('admin_meldungen') }}?status=published">Ansehen <i data-lucide="arrow-right" width="12" height="12"></i></a>
     </div>
     <div class="adm-stat-card">
-      <div class="adm-stat-card__label">Abgelehnt <i data-lucide="x-circle" width="14" height="14"></i></div>
-      <div class="adm-stat-card__value">{{ declined_30d }} <small>/ 30 Tage</small></div>
-      <a class="adm-stat-card__link" href="{{ path('admin_meldungen') }}?status=declined">Ansehen <i data-lucide="arrow-right" width="12" height="12"></i></a>
-    </div>
-    <div class="adm-stat-card">
       <div class="adm-stat-card__label">Routen-Segmente <i data-lucide="route" width="14" height="14"></i></div>
       <div class="adm-stat-card__value">{{ route_segments_count }}</div>
       <a class="adm-stat-card__link" href="{{ path('admin_routes') }}">Ansehen <i data-lucide="arrow-right" width="12" height="12"></i></a>

@@ -758,6 +758,10 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
 // talks to. See this file's top comment.
 var API_BASE = '';
 var TARGET_ROUTE_TYPE_KEY = 'vorschlag-gelbes-band';
+// Which public map this report was submitted from -- see App\Entity\ReportSource / the
+// report_sources table (backend repo). Not the same thing as TARGET_ROUTE_TYPE_KEY above (that's
+// the route *network's* segment type for drawing the band; this is which *tool* sent the report).
+var REPORT_SOURCE = 'velomelder-gelbes-band';
 
 var ROUTE_TYPES = []; // populated from GET /route-types before map init, see bootstrap() below
 var hiddenTypes = new Set(); // never populated here (only one type exists, no toggle UI)
@@ -1991,6 +1995,7 @@ function submitEntry() {
     fd.append('address', lastGeocodedAddress);
     if (lastGeocodedDistanceM != null) fd.append('addressDistanceM', String(lastGeocodedDistanceM));
   }
+  fd.append('source', REPORT_SOURCE);
   fd.append('captchaAnswer', document.getElementById('captcha-input').value.trim());
   pendingPhotos.forEach(function(p) { fd.append('photos[]', p.file); });
 

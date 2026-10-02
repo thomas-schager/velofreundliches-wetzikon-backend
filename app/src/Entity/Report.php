@@ -50,6 +50,12 @@ class Report
     #[ORM\Column(name: 'address_distance_m', type: 'decimal', precision: 6, scale: 1, nullable: true)]
     private ?string $addressDistanceM = null;
 
+    /** Which public map/tool this was submitted from (e.g. "velomelder-gelbes-band") -- FK'd at
+     *  the DB level to report_sources, kept as a plain string here like `rating`, not a Doctrine
+     *  relation; see ReportSource. Nullable only for rows that predate this field. */
+    #[ORM\Column(name: 'source', type: 'string', length: 64, nullable: true)]
+    private ?string $source = null;
+
     #[ORM\Column(name: 'email', type: 'string', length: 255)]
     private string $email;
 
@@ -194,6 +200,18 @@ class Report
     public function setAddressDistanceM(?float $addressDistanceM): static
     {
         $this->addressDistanceM = $addressDistanceM !== null ? (string) $addressDistanceM : null;
+
+        return $this;
+    }
+
+    public function getSource(): ?string
+    {
+        return $this->source;
+    }
+
+    public function setSource(?string $source): static
+    {
+        $this->source = $source;
 
         return $this;
     }

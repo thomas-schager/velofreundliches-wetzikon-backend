@@ -342,7 +342,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
 .adm-table tr.adm-table-row--link:hover { background: var(--color-surface-2); }
 .adm-table td.adm-td-comment { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); }
 .adm-table td.adm-td-muted { color: var(--color-muted); font-size: 13px; }
-.adm-td-name { display: flex; align-items: center; gap: 8px; }
+.adm-td-name { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
 .adm-td-name .adm-badge--anon { background: var(--color-surface-2); color: var(--color-muted); font-weight: 400; }
 .adm-pagination { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; font-size: 13px; color: var(--color-muted); }
 

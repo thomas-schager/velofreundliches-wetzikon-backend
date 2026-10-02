@@ -31,7 +31,6 @@ class DashboardController extends AbstractController
             'admin_first_name' => explode(' ', $user->getDisplayName())[0] ?? null,
             'pending_count' => $this->reports->countByStatus(Report::STATUS_PENDING_REVIEW),
             'published_30d' => $this->reports->countByStatusSince(Report::STATUS_PUBLISHED, $since30d),
-            'declined_30d' => $this->reports->countByStatusSince(Report::STATUS_DECLINED, $since30d),
             'route_segments_count' => count($this->routeFeatures->findAll()),
             'recent_pending' => $this->reports->findRecentByStatus(Report::STATUS_PENDING_REVIEW, 6),
         ]);

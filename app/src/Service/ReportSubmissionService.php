@@ -6,6 +6,7 @@ use App\Entity\Report;
 use App\Entity\ReportPhoto;
 use App\Repository\RatingRepository;
 use App\Repository\ReportRepository;
+use App\Repository\ReportSourceRepository;
 use App\Service\Exception\ExpiredChallengeException;
 use App\Service\Exception\ReportNotFoundException;
 use App\Service\Exception\ValidationException;
@@ -36,6 +37,7 @@ class ReportSubmissionService
     public function __construct(
         private readonly ReportRepository $reports,
         private readonly RatingRepository $ratings,
+        private readonly ReportSourceRepository $sources,
         private readonly EntityManagerInterface $em,
         private readonly LoggerInterface $logger,
         private readonly RouterInterface $router,
@@ -47,7 +49,7 @@ class ReportSubmissionService
     }
 
     /**
-     * @param array{lat: mixed, lng: mixed, rating: mixed, comment: mixed, name?: mixed, email: mixed, address?: mixed, addressDistanceM?: mixed, captchaAnswer?: mixed} $data
+     * @param array{lat: mixed, lng: mixed, rating: mixed, comment: mixed, name?: mixed, email: mixed, address?: mixed, addressDistanceM?: mixed, source: mixed, captchaAnswer?: mixed} $data
      * @param UploadedFile[] $photos
      */
     public function submit(array $data, array $photos, ?string $challengeToken): Report
@@ -67,6 +69,7 @@ class ReportSubmissionService
         $address = $address !== '' ? mb_substr($address, 0, 255) : null;
         $addressDistanceM = filter_var($data['addressDistanceM'] ?? null, FILTER_VALIDATE_FLOAT);
         $addressDistanceM = $addressDistanceM !== false ? $addressDistanceM : null; // false, not 0.0, if absent/invalid -- keep a real 0m distance intact
+        $source = trim((string) ($data['source'] ?? ''));
 
         if ($lat === false) {
             $errors['lat'] = 'required';
@@ -88,6 +91,11 @@ class ReportSubmissionService
         }
         if (!$this->captcha->verify($challengeToken, $data['captchaAnswer'] ?? null)) {
             $errors['captchaAnswer'] = 'incorrect or expired, request a new challenge via GET /reports/challenge';
+        }
+        // Required, not inferred -- every public submission form must identify itself (see
+        // ReportSource / report_sources), so future maps can't silently fall through unattributed.
+        if ($source === '' || $this->sources->find($source) === null) {
+            $errors['source'] = 'required, must be a known key in report_sources';
         }
 
         // Converted here, before the report is ever persisted, so a corrupt/unreadable photo
@@ -116,6 +124,7 @@ class ReportSubmissionService
             ->setAnonymous($name === '')
             ->setAddress($address)
             ->setAddressDistanceM($addressDistanceM)
+            ->setSource($source)
             ->setEmail($email)
             ->setStatus(Report::STATUS_PENDING_EMAIL_CONFIRMATION)
             ->setConfirmationToken(bin2hex(random_bytes(32)))
