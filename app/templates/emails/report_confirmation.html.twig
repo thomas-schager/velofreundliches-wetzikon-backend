@@ -72,7 +72,10 @@
 <table role="presentation" class="email-container" align="center" width="600" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;max-width:600px;width:100%;">
 
   <tr>
-    <td class="email-padded" style="padding:32px 32px 24px;" align="left">
+    <!-- Left/right 41px, not 40px -- matches the card's own content inset exactly: 1px border +
+         40px padding on the card below, so the logo and the body text line up on the same left
+         edge instead of sitting 9px apart. -->
+    <td class="email-padded" style="padding:32px 41px 24px;" align="left">
       <a href="https://velofreundliches-wetzikon.ch/?{{ siteUtmBase }}&amp;utm_content=logo" target="_blank">
         <img src="{{ absolute_url(asset('assets/email/logo.png')) }}" width="168" height="29" alt="Velofreundliches Wetzikon" style="display:block;border:0;outline:none;text-decoration:none;max-width:168px;" />
       </a>
