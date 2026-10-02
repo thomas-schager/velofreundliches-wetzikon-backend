@@ -49,7 +49,11 @@ class ReportModerationService
 
     /**
      * @param array<string, mixed> $patch AdminReportPatch shape: lat, lng, rating, comment, name,
-     *                                     anonymous, status, internalNote -- all optional.
+     *                                     anonymous, status, internalNote, deletePhotoIds, address,
+     *                                     addressDistanceM -- all optional. address/addressDistanceM
+     *                                     are supplied by the client (reverse-geocoded there, same
+     *                                     as the public submission flow in
+     *                                     velomelder-gelbes-band.html) rather than recomputed here.
      */
     public function update(Report $report, array $patch, int $expectedVersion, AdminUser $moderator): Report
     {
@@ -81,9 +85,26 @@ class ReportModerationService
             if (array_key_exists('anonymous', $patch)) {
                 $report->setAnonymous((bool) $patch['anonymous']);
             }
+            if (array_key_exists('address', $patch)) {
+                $address = $patch['address'];
+                $report->setAddress($address !== null && $address !== '' ? (string) $address : null);
+            }
+            if (array_key_exists('addressDistanceM', $patch)) {
+                $distance = $patch['addressDistanceM'];
+                $report->setAddressDistanceM($distance !== null ? (float) $distance : null);
+            }
             if (array_key_exists('internalNote', $patch)) {
                 $note = trim((string) $patch['internalNote']);
                 $report->setInternalNote($note !== '' ? $note : null);
+            }
+
+            if (array_key_exists('deletePhotoIds', $patch) && is_array($patch['deletePhotoIds'])) {
+                $idsToDelete = array_map('intval', $patch['deletePhotoIds']);
+                foreach ($report->getPhotos() as $photo) {
+                    if (in_array($photo->getId(), $idsToDelete, true)) {
+                        $report->removePhoto($photo);
+                    }
+                }
             }
 
             if (array_key_exists('status', $patch)) {

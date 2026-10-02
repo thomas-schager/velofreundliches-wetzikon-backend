@@ -347,4 +347,15 @@ class Report
 
         return $this;
     }
+
+    /**
+     * orphanRemoval on the mapping above means removing a photo from this collection deletes its
+     * row on the next flush -- no separate EntityManager::remove() call needed.
+     */
+    public function removePhoto(ReportPhoto $photo): static
+    {
+        $this->photos->removeElement($photo);
+
+        return $this;
+    }
 }

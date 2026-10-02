@@ -86,6 +86,10 @@ button { font-family: inherit; }
 .adm-btn--block { width: 100%; }
 .adm-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .adm-btn svg { flex-shrink: 0; }
+/* Without this, [hidden] has no effect on a button -- same reasoning as .adm-preview-banner[hidden]
+   further down: .adm-btn's own `display: inline-flex` (an author rule) otherwise beats the UA
+   stylesheet's `[hidden] { display: none }`. */
+.adm-btn[hidden] { display: none; }
 
 /* ============================================================
    FORMS
@@ -353,7 +357,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
 @media (min-width: 1080px) { .adm-detail-grid { grid-template-columns: 1fr 380px; align-items: start; } }
 
 .adm-detail-map { height: 260px; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--color-border); background: var(--color-surface-2); margin-bottom: var(--space-5); position: relative; }
-.adm-detail-map .adm-map-hint { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.72); color: #fff; font: 400 12px var(--font-body); padding: 6px 12px; border-radius: 999px; pointer-events: none; }
+/* z-index: 1000 for the same reason .map-toggle needs it -- Leaflet's own panes inside #meldungMap
+   otherwise paint over a plain sibling despite DOM order. */
+.adm-detail-map .adm-map-hint { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 1000; background: rgba(0,0,0,0.72); color: #fff; font: 400 12px var(--font-body); padding: 6px 12px; border-radius: 999px; pointer-events: none; }
 
 /* Map look & feel vendored from velofreundliches-wetzikon-design-system's design-system/map.html
    (canonical reference: velo-melder.html in velofreundliches-wetzikon-contao) -- same tile
@@ -381,6 +387,47 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
 .adm-photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .adm-photo-thumb__remove { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; background: rgba(0,0,0,0.55); color: #fff; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 
+/* Photo gallery (main photo + thumbnail strip) -- ported directly from velomelder-gelbes-band.html's
+   .detail-gallery/.detail-photo-main/.detail-photo-thumbs (same breakpoints and sizes), so a
+   Meldung's photos look and behave the same here as in the public detail popup: a large main photo
+   (click opens the full viewer below) with a thumbnail strip to switch it, hidden entirely when
+   there's only one photo. Admin's own canonical tokens, not the public page's vendored --vw-* ones. */
+.adm-photo-gallery { display: flex; flex-direction: column; gap: 8px; }
+.adm-photo-main-wrap { min-width: 0; position: relative; }
+.adm-photo-main { width: 100%; max-height: 260px; object-fit: cover; border-radius: var(--radius-md); border: 1px solid var(--color-border); display: block; cursor: pointer; }
+.adm-photo-thumbs { display: flex; flex-direction: row; gap: 6px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+.adm-photo-thumbs img { flex: 0 0 auto; width: 56px; height: 56px; object-fit: cover; border-radius: var(--radius-sm); border: 2px solid transparent; cursor: pointer; opacity: 0.7; transition: opacity var(--dur) var(--ease), border-color var(--dur); }
+.adm-photo-thumbs img:hover { opacity: 1; }
+.adm-photo-thumbs img.active { opacity: 1; border-color: var(--color-primary); }
+@media (min-width: 600px) {
+  .adm-photo-gallery { flex-direction: row; align-items: flex-start; }
+  .adm-photo-main-wrap { flex: 1 1 auto; }
+  .adm-photo-main { max-height: 320px; }
+  .adm-photo-thumbs { flex-direction: column; overflow-x: visible; overflow-y: auto; padding-bottom: 0; flex: 0 0 76px; max-height: 320px; }
+  .adm-photo-thumbs img { width: 100%; height: 64px; }
+}
+@media (min-width: 900px) {
+  .adm-photo-main { max-height: 380px; }
+  .adm-photo-thumbs { max-height: 380px; }
+}
+
+/* Photo viewer -- same <dialog>/prev-next/counter pattern as velomelder-gelbes-band.html's shared
+   photo viewer (view-only here, no remove action; admin photo editing isn't in scope). Native
+   <dialog> top-layer handles stacking/backdrop/focus-trap/Escape, same reasoning as that file. */
+.adm-photo-viewer { border: none; padding: 0; background: transparent; max-width: 94vw; max-height: 94vh; overflow: visible; z-index: 5000; }
+.adm-photo-viewer::backdrop { background: rgba(0,0,0,0.82); }
+.adm-photo-viewer-img { display: block; max-width: 92vw; max-height: 80vh; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); }
+.adm-photo-viewer-close { position: fixed; top: 18px; right: 22px; width: 32px; height: 32px; padding: 0; background: none; border: none; color: #fff; cursor: pointer; opacity: 0.7; display: flex; align-items: center; justify-content: center; transition: opacity var(--dur); }
+.adm-photo-viewer-close:hover { opacity: 1; }
+.adm-photo-viewer-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border-radius: var(--radius-full); border: none; background: rgba(255,255,255,0.15); color: #fff; font-size: 1.5rem; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background var(--dur); }
+.adm-photo-viewer-nav:hover { background: rgba(255,255,255,0.3); }
+.adm-photo-viewer-nav:disabled { opacity: 0; pointer-events: none; }
+.adm-photo-viewer-prev { left: 18px; }
+.adm-photo-viewer-next { right: 18px; }
+.adm-photo-viewer-footer { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); }
+.adm-photo-viewer-counter { display: none; color: #fff; font-size: var(--text-sm); font-family: var(--font-body); background: rgba(0,0,0,0.45); padding: 5px 14px; border-radius: var(--radius-full); }
+.adm-photo-viewer-counter.multi { display: inline-block; }
+
 .adm-rating-edit { display: flex; gap: 6px; }
 .adm-rating-edit button {
   flex: 1 1 0; min-width: 0; min-height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
@@ -399,6 +446,33 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
 .adm-rating-edit button[data-r="5"].is-selected .adm-r-bar { outline-color: var(--color-rate-5); }
 .adm-rating-edit .adm-r-label { font-size: 11px; color: var(--color-label-muted); padding-top: 5px; text-align: center; }
 .adm-rating-edit button.is-selected .adm-r-label { color: var(--color-text); font-weight: 600; }
+
+/* Read-only report view (left column of the Meldung detail page) -- mirrors the information
+   sequence of the public VeloMelder detail popup (map, rating/address, byline, comment, photos),
+   see velomelder-gelbes-band.html's openDetailModal(). */
+.adm-report-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+/* Without this, [hidden] has no effect here -- same reasoning as .adm-preview-banner[hidden]
+   below: this element's own `display: flex` (an author rule) otherwise beats the UA stylesheet's
+   `[hidden] { display: none }`. */
+.adm-report-meta[hidden] { display: none; }
+.adm-report-address { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--color-text-muted); }
+.adm-report-byline { font-size: 13px; color: var(--color-muted); margin-bottom: 14px; }
+.adm-report-comment { font-size: 14px; line-height: 1.6; color: var(--color-text); white-space: pre-wrap; margin-bottom: 18px; }
+
+/* Ablehnen/Veröffentlichen directly below the content they judge, not a page-wide sticky bar
+   (see .adm-sticky-actions below, still used by the route editor's Speichern). */
+.adm-detail-actions { display: flex; gap: 10px; margin-top: var(--space-5); }
+.adm-detail-actions .adm-btn { flex: 1; }
+/* Without this, [hidden] has no effect here -- same reasoning as .adm-preview-banner[hidden]
+   below: this element's own `display: flex` (an author rule) otherwise beats the UA stylesheet's
+   `[hidden] { display: none }`. Toggled between view mode's Ablehnen/Veröffentlichen row and edit
+   mode's Speichern/Verwerfen row. */
+.adm-detail-actions[hidden] { display: none; }
+
+/* Status + received date -- used to live in the page header; moved into the right column's lead
+   card now that the header itself is gone (only the back link remains above the map). */
+.adm-detail-status { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-bottom: 14px; border-bottom: 1px solid var(--color-border); }
+.adm-detail-received { font-size: 12px; color: var(--color-muted); }
 
 .adm-kv { display: flex; flex-direction: column; gap: 12px; }
 .adm-kv__row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 10px 0; border-bottom: 1px solid var(--color-border); }

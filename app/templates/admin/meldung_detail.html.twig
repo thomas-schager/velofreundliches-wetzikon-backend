@@ -7,125 +7,157 @@
 {% endblock %}
 
 {% block body %}
-<main class="adm-main" style="padding-bottom:100px;">
-  <a href="{{ path('admin_meldungen') }}" class="adm-auth__back" style="margin-bottom:16px;"><i data-lucide="arrow-left" width="14" height="14"></i> Zurück zu Meldungen</a>
-
-  <div class="adm-page-head">
-    <div>
-      <h1 style="display:flex;align-items:center;gap:10px;">Meldung <span style="font-family:monospace;font-size:16px;color:var(--color-muted);">#{{ report_id }}</span></h1>
-      <p>Eingegangen {{ report.createdAt|date('d.m.Y, H:i') }} Uhr</p>
-    </div>
-    <div class="adm-page-head__actions">
-      <span id="statusBadge">
-        {% if report.status == 'published' %}
-          <span class="adm-badge adm-badge--published"><span class="adm-badge__dot"></span>Veröffentlicht</span>
-        {% elseif report.status == 'declined' %}
-          <span class="adm-badge adm-badge--declined"><span class="adm-badge__dot"></span>Abgelehnt</span>
-        {% elseif report.status == 'pending_review' %}
-          <span class="adm-badge adm-badge--new"><span class="adm-badge__dot"></span>Neu</span>
-        {% else %}
-          <span class="adm-badge"><span class="adm-badge__dot"></span>Ausstehend (E-Mail)</span>
-        {% endif %}
-      </span>
-    </div>
-  </div>
-
-  {% if report.status not in ['pending_review'] %}
-  <div class="adm-alert" style="background:#eef2ff;border:1px solid #6366f1;color:#3730a3;margin-bottom:16px;">
-    <i data-lucide="info" width="16" height="16"></i>
-    <span>Status ist "{{ report.status }}" — Veröffentlichen/Ablehnen ist normalerweise nur aus "Neu" (pending_review) vorgesehen, ist hier aber zu Testzwecken trotzdem verfügbar.</span>
-  </div>
+{% set address_label = null %}
+{% if report.address and report.addressDistanceM is not null %}
+  {% if report.addressDistanceM <= 20 %}
+    {% set address_label = report.address %}
+  {% elseif report.addressDistanceM <= 50 %}
+    {% set address_label = 'In der Nähe von ' ~ report.address %}
   {% endif %}
+{% endif %}
+
+<main class="adm-main">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:var(--space-4);">
+    <a href="{{ path('admin_meldungen') }}" class="adm-auth__back" style="margin-bottom:0;"><i data-lucide="arrow-left" width="14" height="14"></i> Zurück zu Meldungen</a>
+    <button type="button" class="adm-btn adm-btn--secondary adm-btn--sm" id="btnEdit"><i data-lucide="pencil" width="14" height="14"></i> Bearbeiten</button>
+  </div>
 
   <div class="adm-detail-grid">
-    <!-- LEFT: editable content -->
+    <!-- LEFT: view mode shows the report in the same information sequence as a published
+         Meldung's detail popup in VeloMelder (map -> rating/address -> byline -> comment ->
+         photos), see velomelder-gelbes-band.html's openDetailModal(). "Bearbeiten" swaps each
+         view element for its editable twin in place (map pin, rating, name, comment, photo
+         removal) -- see enterEditMode()/exitEditMode() below. No photo upload here by design. -->
     <div>
-      <div class="adm-field">
-        <label class="adm-label">Standort</label>
+      <div class="adm-card">
         <div class="adm-detail-map">
           <div id="meldungMap"></div>
           <div class="map-toggle">
             <button type="button" class="map-toggle-btn active" id="btnLayerStreet">Strasse</button>
             <button type="button" class="map-toggle-btn" id="btnLayerSatellite">Satellit</button>
           </div>
-          <span class="adm-map-hint">Pin ziehen, um den Standort zu korrigieren</span>
+          <span class="adm-map-hint" id="mapHint" hidden>Pin ziehen, um den Standort zu korrigieren</span>
         </div>
+
+        <div class="adm-report-meta" id="ratingAddressRow">
+          <span class="adm-rate-pill" data-r="{{ report.rating }}">{{ rating_labels[report.rating]|default(report.rating) }}</span>
+          {% if address_label %}
+          <span class="adm-report-address"><i data-lucide="map-pin" width="13" height="13"></i> {{ address_label }}</span>
+          {% endif %}
+        </div>
+        <div class="adm-field" id="ratingEditField" hidden>
+          <label class="adm-label">Bewertung</label>
+          <div class="adm-rating-edit" id="ratingEdit">
+            {% for rv, label in rating_labels %}
+            <button type="button" data-r="{{ rv }}" class="{{ rv == report.rating ? 'is-selected' : '' }}"><span class="adm-r-bar"></span><span class="adm-r-label">{{ label }}</span></button>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="adm-report-byline" id="bylineView">{{ (report.anonymous or report.name is empty) ? 'Anonym' : report.name }} · {{ report.createdAt|date('d.m.Y') }}</div>
+        <div class="adm-field" id="nameEditField" hidden>
+          <div style="display:flex;gap:24px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:200px;">
+              <label class="adm-label" for="nameField">Name</label>
+              <input type="text" id="nameField" placeholder="Name (optional)" value="{{ report.name }}" {{ report.anonymous ? 'disabled' : '' }}>
+            </div>
+            <div style="padding-top:26px;">
+              <label class="adm-checkbox-row"><input type="checkbox" id="anonField" style="width:16px;height:16px;min-height:0;" {{ report.anonymous ? 'checked' : '' }}> Anonym anzeigen</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="adm-report-comment" id="commentView">{{ report.comment }}</div>
+        <div class="adm-field" id="commentEditField" hidden>
+          <label class="adm-label" for="commentField">Kommentar</label>
+          <textarea id="commentField" rows="4">{{ report.comment }}</textarea>
+        </div>
+
+        <div id="photoGalleryContainer"></div>
+        <p id="noPhotosMsg" style="color:var(--color-muted);font-size:13px;" hidden>Keine Fotos angehängt.</p>
       </div>
 
-      <div class="adm-field">
-        <label class="adm-label">Bewertung</label>
-        <div class="adm-rating-edit" id="ratingEdit">
-          {% for rv, label in rating_labels %}
-          <button type="button" data-r="{{ rv }}" class="{{ rv == report.rating ? 'is-selected' : '' }}"><span class="adm-r-bar"></span><span class="adm-r-label">{{ label }}</span></button>
-          {% endfor %}
-        </div>
+      <!-- View mode: Ablehnen/Veröffentlichen, the main action, directly below the content they
+           judge. Edit mode: Speichern/Verwerfen instead -- moderation decisions pause while a
+           field edit is in flight so a decision is never made on about-to-change data. -->
+      <div class="adm-detail-actions" id="viewActions">
+        <button class="adm-btn adm-btn--danger" id="btnDecline" {{ report.status == 'declined' ? 'disabled' : '' }} title="{{ report.status == 'declined' ? 'Bereits abgelehnt' : '' }}"><i data-lucide="x" width="15" height="15"></i> Ablehnen</button>
+        <button class="adm-btn adm-btn--primary" id="btnPublish" {{ report.status == 'published' ? 'disabled' : '' }} title="{{ report.status == 'published' ? 'Bereits veröffentlicht' : '' }}"><i data-lucide="check" width="15" height="15"></i> Veröffentlichen</button>
       </div>
-
-      <div class="adm-field">
-        <label class="adm-label" for="commentField">Kommentar</label>
-        <textarea id="commentField" rows="4">{{ report.comment }}</textarea>
-      </div>
-
-      <div class="adm-field">
-        <label class="adm-label">Fotos</label>
-        <div class="adm-photo-grid" id="photoGrid">
-          {% for photo in report.photos %}
-          <div class="adm-photo-thumb"><img src="{{ photo.url }}" alt="Foto"></div>
-          {% else %}
-          <p style="color:var(--color-muted);font-size:13px;">Keine Fotos angehängt.</p>
-          {% endfor %}
-        </div>
-      </div>
-
-      <div class="adm-field" style="display:flex;gap:24px;flex-wrap:wrap;">
-        <div style="flex:1;min-width:200px;">
-          <label class="adm-label" for="nameField">Name</label>
-          <input type="text" id="nameField" placeholder="Name (optional)" value="{{ report.name }}" {{ report.anonymous ? 'disabled' : '' }}>
-        </div>
-        <div style="padding-top:26px;">
-          <label class="adm-checkbox-row"><input type="checkbox" id="anonField" style="width:16px;height:16px;min-height:0;" {{ report.anonymous ? 'checked' : '' }}> Anonym anzeigen</label>
-        </div>
+      <div class="adm-detail-actions" id="editActions" hidden>
+        <button type="button" class="adm-btn adm-btn--ghost" id="btnDiscardEdit"><i data-lucide="x" width="15" height="15"></i> Verwerfen</button>
+        <button type="button" class="adm-btn adm-btn--primary" id="btnSaveEdit" disabled title="Keine Änderungen zum Speichern"><i data-lucide="save" width="15" height="15"></i> Speichern</button>
       </div>
     </div>
 
-    <!-- RIGHT: metadata -->
+    <!-- RIGHT: status/received first (the at-a-glance "where does this stand" info that used to
+         live in the page header), then the data hidden or summarized on the left for privacy/
+         legibility reasons (full address + raw distance even when the left column hides or
+         softens it; real name even when displayed anonymously), then the independently-saved
+         Interne Notiz. Unaffected by edit mode -- none of this is being edited. -->
     <div>
       <div class="adm-card">
-        <div style="font:600 13px var(--font-display);margin-bottom:14px;">Details</div>
+        <div class="adm-detail-status">
+          <span id="statusBadge">
+            {% if report.status == 'published' %}
+              <span class="adm-badge adm-badge--published"><span class="adm-badge__dot"></span>Veröffentlicht</span>
+            {% elseif report.status == 'declined' %}
+              <span class="adm-badge adm-badge--declined"><span class="adm-badge__dot"></span>Abgelehnt</span>
+            {% elseif report.status == 'pending_review' %}
+              <span class="adm-badge adm-badge--new"><span class="adm-badge__dot"></span>Neu</span>
+            {% else %}
+              <span class="adm-badge"><span class="adm-badge__dot"></span>Ausstehend (E-Mail)</span>
+            {% endif %}
+          </span>
+          <span class="adm-detail-received">Eingegangen {{ report.createdAt|date('d.m.Y, H:i') }} Uhr</span>
+        </div>
+        <div style="font:600 13px var(--font-display);margin:16px 0 14px;">Details</div>
         <div class="adm-kv">
-          <div class="adm-kv__row"><span class="adm-kv__label">ID</span><span class="adm-kv__value adm-kv__value--mono">{{ report_id }}</span></div>
           <div class="adm-kv__row"><span class="adm-kv__label">Koordinaten</span><span class="adm-kv__value adm-kv__value--mono" id="kvLatLng">{{ report.lat }}, {{ report.lng }}</span></div>
           <div class="adm-kv__row"><span class="adm-kv__label">Quelle</span><span class="adm-kv__value">{{ source_labels[report.source]|default('—') }}</span></div>
-          <div class="adm-kv__row"><span class="adm-kv__label">Adresse (geokodiert)</span><span class="adm-kv__value">{{ report.address ?: '—' }}</span></div>
-          <div class="adm-kv__row"><span class="adm-kv__label">Distanz zur Adresse</span><span class="adm-kv__value">{{ report.addressDistanceM is not null ? report.addressDistanceM ~ ' m' : '—' }}</span></div>
-          <div class="adm-kv__row"><span class="adm-kv__label">E-Mail (intern)</span><span class="adm-kv__value adm-kv__value--email">{{ report.email }}{% if report.emailConfirmed %} <i data-lucide="check-circle" width="13" height="13" style="color:var(--color-success);"></i>{% endif %}</span></div>
+          <div class="adm-kv__row"><span class="adm-kv__label">Adresse (geokodiert)</span><span class="adm-kv__value" id="kvAddress">{{ report.address ?: '—' }}</span></div>
+          <div class="adm-kv__row"><span class="adm-kv__label">Distanz zur Adresse</span><span class="adm-kv__value" id="kvAddressDistance">{{ report.addressDistanceM is not null ? report.addressDistanceM ~ ' m' : '—' }}</span></div>
+          <div class="adm-kv__row"><span class="adm-kv__label">Name</span><span class="adm-kv__value">{{ report.name ?: '—' }}</span></div>
+          <div class="adm-kv__row"><span class="adm-kv__label">Anzeige</span><span class="adm-kv__value">{{ report.anonymous ? 'Anonym' : 'Mit Namen' }}</span></div>
+          <div class="adm-kv__row">
+            <span class="adm-kv__label">E-Mail (intern)
+              <span title="Die E-Mail-Adresse ist ausschliesslich für die interne Moderation sichtbar. Sie erscheint in keiner öffentlichen Ansicht oder API-Antwort." style="cursor:help;display:inline-flex;vertical-align:-2px;">
+                <i data-lucide="info" width="12" height="12" style="color:var(--color-muted);"></i>
+              </span>
+            </span>
+            <span class="adm-kv__value adm-kv__value--email">{{ report.email }}{% if report.emailConfirmed %} <i data-lucide="check-circle" width="13" height="13" style="color:var(--color-success);"></i>{% endif %}</span>
+          </div>
           <div class="adm-kv__row"><span class="adm-kv__label">E-Mail bestätigt</span><span class="adm-kv__value">{{ report.emailConfirmed ? 'Ja' : 'Nein' }}</span></div>
-        </div>
-        <div class="adm-internal-note">
-          <i data-lucide="lock" width="14" height="14"></i>
-          <span>Die E-Mail-Adresse ist ausschliesslich für die interne Moderation sichtbar. Sie erscheint in keiner öffentlichen Ansicht oder API-Antwort (siehe API-Spezifikation, Tag "Admin").</span>
         </div>
       </div>
 
+      <!-- Interne Notiz saves independently of the moderation decision -- a comment left here
+           shouldn't require (or wait for) an Ablehnen/Veröffentlichen click, and vice versa. -->
       <div class="adm-card" style="margin-top:16px;">
         <div style="font:600 13px var(--font-display);margin-bottom:14px;">Interne Notiz</div>
         <textarea id="internalNoteField" rows="3" placeholder="Nur für die Redaktion sichtbar…">{{ report.internalNote }}</textarea>
+        <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+          <button class="adm-btn adm-btn--secondary adm-btn--sm" id="btnSaveNote" disabled title="Keine Änderungen zum Speichern"><i data-lucide="save" width="14" height="14"></i> Notiz speichern</button>
+        </div>
       </div>
     </div>
   </div>
 </main>
 
-<div class="adm-sticky-actions" style="margin-left:var(--space-7);margin-right:var(--space-7);max-width:1320px;margin-inline:auto;">
-  <span class="adm-sticky-actions__status" aria-live="polite">Status: <strong id="stickyStatusText">
-    {% if report.status == 'published' %}Veröffentlicht
-    {% elseif report.status == 'declined' %}Abgelehnt
-    {% elseif report.status == 'pending_review' %}Neu — noch nicht geprüft
-    {% else %}Ausstehend (E-Mail-Bestätigung){% endif %}
-  </strong></span>
-  <button class="adm-btn adm-btn--danger" id="btnDecline" {{ report.status == 'declined' ? 'disabled' : '' }} title="{{ report.status == 'declined' ? 'Bereits abgelehnt' : '' }}"><i data-lucide="x" width="15" height="15"></i> Ablehnen</button>
-  <button class="adm-btn adm-btn--secondary" id="btnSave" disabled title="Keine Änderungen zum Speichern"><i data-lucide="save" width="15" height="15"></i> Änderungen speichern</button>
-  <button class="adm-btn adm-btn--primary" id="btnPublish" {{ report.status == 'published' ? 'disabled' : '' }} title="{{ report.status == 'published' ? 'Bereits veröffentlicht' : '' }}"><i data-lucide="check" width="15" height="15"></i> Veröffentlichen</button>
-</div>
+<!-- Photo viewer -- same <dialog>/prev-next/counter pattern as velomelder-gelbes-band.html's
+     shared photo viewer (view mode: no remove action here, that lives in the inline gallery
+     below it instead, see renderPhotoGallery()). -->
+<dialog class="adm-photo-viewer" id="admPhotoViewer">
+  <button class="adm-photo-viewer-close" onclick="closeAdminPhotoViewer()" type="button" aria-label="Schliessen">
+    <svg width="16" height="16" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><line x1="1" y1="1" x2="13" y2="13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><line x1="13" y1="1" x2="1" y2="13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+  </button>
+  <button class="adm-photo-viewer-nav adm-photo-viewer-prev" id="admPhotoViewerPrev" onclick="adminPhotoViewerStep(-1)" type="button" aria-label="Vorheriges Foto">&#8249;</button>
+  <img class="adm-photo-viewer-img" id="admPhotoViewerImg" src="" alt="Foto" />
+  <button class="adm-photo-viewer-nav adm-photo-viewer-next" id="admPhotoViewerNext" onclick="adminPhotoViewerStep(1)" type="button" aria-label="Nächstes Foto">&#8250;</button>
+  <div class="adm-photo-viewer-footer">
+    <span class="adm-photo-viewer-counter" id="admPhotoViewerCounter"></span>
+  </div>
+</dialog>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -136,30 +168,16 @@ document.addEventListener('DOMContentLoaded', function () {
   var version = {{ report.version }};
   var lat = {{ report.lat }};
   var lng = {{ report.lng }};
+  var rating = {{ report.rating }};
+  var address = {{ report.address ? report.address|json_encode|raw : 'null' }};
+  var addressDistanceM = {{ report.addressDistanceM is not null ? report.addressDistanceM : 'null' }};
   var ratingColors = {{ rating_colors|json_encode|raw }};
+  var reportPhotos = {{ report.photos|map(p => {'id': p.id, 'url': p.url})|json_encode|raw }};
+  var deletedPhotoIds = {};
+  var editMode = false;
+  var fieldSnapshot = null;
 
-  /* ---- Rating editor ---- */
-  var ratingEdit = document.getElementById('ratingEdit');
-  var selectedRating = {{ report.rating }};
-  function selectRating(r) {
-    selectedRating = r;
-    Array.prototype.slice.call(ratingEdit.querySelectorAll('button')).forEach(function (b) {
-      b.classList.toggle('is-selected', Number(b.dataset.r) === r);
-    });
-    if (marker) marker.setIcon(makeIcon(selectedRating));
-    checkDirty();
-  }
-  ratingEdit.querySelectorAll('button').forEach(function (btn) {
-    btn.addEventListener('click', function () { selectRating(Number(btn.dataset.r)); });
-  });
-
-  /* ---- Anonym toggle ---- */
-  document.getElementById('anonField').addEventListener('change', function () {
-    document.getElementById('nameField').disabled = this.checked;
-    checkDirty();
-  });
-
-  /* ---- Map (draggable pin) ----
+  /* ---- Map -- pin is draggable only while editMode is on (see enterEditMode()/exitEditMode()).
      Tile layers, toggle control and pin marker match the canonical look documented in
      velofreundliches-wetzikon-design-system's design-system/map.html (source: velo-melder.html
      in velofreundliches-wetzikon-contao) -- keep in sync with that doc, not styled ad-hoc here.
@@ -200,49 +218,79 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('btnLayerSatellite').classList.toggle('active', name === 'satellite');
   }
 
-  var marker = L.marker([lat, lng], { draggable: true, icon: makeIcon(selectedRating) }).addTo(map);
+  // draggable:true at construction time so Leaflet actually creates the marker.dragging handler
+  // -- it only does that up front, so this can't be turned on later if it starts false here.
+  var marker = L.marker([lat, lng], { draggable: true, icon: makeIcon(rating) }).addTo(map);
+  marker.dragging.disable();
   marker.on('dragend', function () {
     var pos = marker.getLatLng();
     lat = pos.lat; lng = pos.lng;
-    document.getElementById('kvLatLng').textContent = lat.toFixed(6) + ', ' + lng.toFixed(6);
-    checkDirty();
+    var kv = document.getElementById('kvLatLng');
+    if (kv) kv.textContent = lat.toFixed(6) + ', ' + lng.toFixed(6);
+    reverseGeocode(pos);
+    checkEditDirty();
   });
 
-  function currentPatch() {
-    return {
-      lat: lat,
-      lng: lng,
-      rating: selectedRating,
-      comment: document.getElementById('commentField').value,
-      name: document.getElementById('nameField').value,
-      anonymous: document.getElementById('anonField').checked,
-      internalNote: document.getElementById('internalNoteField').value
-    };
+  /* ---- Reverse geocoding -- same Photon lookup and distance math as
+     velomelder-gelbes-band.html's reverseGeocode()/distanceMeters(), so moving the pin here
+     re-derives the address the same way the public submission form does, rather than leaving a
+     stale address/distance behind after relocating a report. Fires on dragend (not during the
+     drag itself), same as the public page.
+     &layer=house (not in the public page's version): without it, Photon reverse just returns
+     whatever OSM feature is nearest the exact point -- a street centerline, a waterway, anything
+     -- so a pin dropped a few metres off a building silently loses its housenumber ("Bachtelstrasse"
+     instead of "Bachtelstrasse 37"). Restricting to the house layer reliably finds the nearest
+     addressable building instead; only genuinely address-less areas fall back to no housenumber. */
+  function distanceMeters(lat1, lng1, lat2, lng2) {
+    var R = 6371000;
+    var toRad = function (d) { return d * Math.PI / 180; };
+    var dLat = toRad(lat2 - lat1);
+    var dLng = toRad(lng2 - lng1);
+    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+      + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+  function updateAddressDisplay() {
+    var kvA = document.getElementById('kvAddress');
+    var kvD = document.getElementById('kvAddressDistance');
+    if (kvA) kvA.textContent = address || '—';
+    if (kvD) kvD.textContent = addressDistanceM != null ? Math.round(addressDistanceM) + ' m' : '—';
+  }
+  function reverseGeocode(latlng) {
+    var kvA = document.getElementById('kvAddress');
+    var kvD = document.getElementById('kvAddressDistance');
+    if (kvA) kvA.textContent = 'Wird ermittelt…';
+    if (kvD) kvD.textContent = 'Wird ermittelt…';
+    fetch('https://photon.komoot.io/reverse?lon=' + latlng.lng + '&lat=' + latlng.lat + '&lang=de&layer=house')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var feat = data.features && data.features[0];
+        var rawAddress = null, distanceM = null;
+        if (feat) {
+          var p = feat.properties || {};
+          var parts = [];
+          var road = p.street || p.name || '';
+          var hn = p.housenumber || '';
+          var city = p.city || p.town || p.village || p.locality || '';
+          if (road) parts.push(road + (hn ? ' ' + hn : ''));
+          if (city) parts.push(city);
+          if (parts.length) rawAddress = parts.join(', ');
+          else if (p.name) rawAddress = p.name;
+          var coords = feat.geometry && feat.geometry.coordinates;
+          if (coords) distanceM = distanceMeters(latlng.lat, latlng.lng, coords[1], coords[0]);
+        }
+        address = rawAddress;
+        addressDistanceM = distanceM;
+        updateAddressDisplay();
+      })
+      .catch(function () {
+        address = null;
+        addressDistanceM = null;
+        updateAddressDisplay();
+      });
   }
 
-  /* ---- Change tracking -- "Änderungen speichern" only makes sense once something is
-     actually different from what's currently saved (same principle as the route editor's
-     isDirty: don't enable an action that would have no effect). "Veröffentlichen"/"Ablehnen"
-     are workflow actions, not save actions, so they're disabled only when already in that
-     target status (computed once server-side above), independent of field edits -- approving
-     a report shouldn't require touching a field first. */
-  var savedPatch = currentPatch();
-  var btnSave = document.getElementById('btnSave');
-  function patchesEqual(a, b) {
-    return a.lat === b.lat && a.lng === b.lng && a.rating === b.rating && a.comment === b.comment
-      && a.name === b.name && a.anonymous === b.anonymous && a.internalNote === b.internalNote;
-  }
-  function checkDirty() {
-    var dirty = !patchesEqual(currentPatch(), savedPatch);
-    btnSave.disabled = !dirty;
-    btnSave.title = dirty ? '' : 'Keine Änderungen zum Speichern';
-  }
-  document.getElementById('commentField').addEventListener('input', checkDirty);
-  document.getElementById('nameField').addEventListener('input', checkDirty);
-  document.getElementById('internalNoteField').addEventListener('input', checkDirty);
-
-  function submitPatch(extra, onSuccess) {
-    var body = Object.assign(currentPatch(), extra || {});
+  function submitPatch(body, onSuccess) {
     fetch(reportApiUrl, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'If-Match': String(version) },
@@ -265,13 +313,26 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
-  document.getElementById('btnSave').addEventListener('click', function () {
-    submitPatch({}, function () {
-      savedPatch = currentPatch();
-      checkDirty();
-      alert('Änderungen gespeichert.');
+  /* ---- Interne Notiz -- saves independently of the Ablehnen/Veröffentlichen decision, via its
+     own PATCH containing only internalNote (every field in AdminReportPatch is optional, see
+     ReportModerationService::update()). ---- */
+  var internalNoteField = document.getElementById('internalNoteField');
+  var btnSaveNote = document.getElementById('btnSaveNote');
+  var savedNote = internalNoteField.value;
+  function checkNoteDirty() {
+    var dirty = internalNoteField.value !== savedNote;
+    btnSaveNote.disabled = !dirty;
+    btnSaveNote.title = dirty ? '' : 'Keine Änderungen zum Speichern';
+  }
+  internalNoteField.addEventListener('input', checkNoteDirty);
+  btnSaveNote.addEventListener('click', function () {
+    submitPatch({ internalNote: internalNoteField.value }, function () {
+      savedNote = internalNoteField.value;
+      checkNoteDirty();
+      alert('Notiz gespeichert.');
     });
   });
+
   document.getElementById('btnPublish').addEventListener('click', function () {
     submitPatch({ status: 'published' }, function () {
       window.location.href = '{{ path('admin_meldungen') }}?status=published';
@@ -284,6 +345,212 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
+  /* ---- Photo gallery (main photo + thumbnail strip) -- same main/thumbs swap as
+     velomelder-gelbes-band.html's selectDetailPhoto(). Rebuilt from reportPhotos on every change
+     (selection, edit mode toggle, deletion) rather than patched in place, since the visible list
+     itself can shrink while editing -- see visiblePhotos(). window.admPhotoIndex (not a closure
+     var) because the main photo's inline onclick reads it at click time to open the full viewer
+     at whichever photo is currently selected. */
+  window.admPhotoIndex = 0;
+  function visiblePhotos() {
+    return reportPhotos.filter(function (p) { return !deletedPhotoIds[p.id]; });
+  }
+  function selectAdminPhoto(i) {
+    window.admPhotoIndex = i;
+    renderPhotoGallery();
+  }
+  window.selectAdminPhoto = selectAdminPhoto;
+  function removeAdminPhoto(id) {
+    deletedPhotoIds[id] = true;
+    renderPhotoGallery();
+    checkEditDirty();
+  }
+  window.removeAdminPhoto = removeAdminPhoto;
+  function renderPhotoGallery() {
+    var photos = visiblePhotos();
+    var container = document.getElementById('photoGalleryContainer');
+    document.getElementById('noPhotosMsg').hidden = photos.length > 0;
+    if (photos.length === 0) { container.innerHTML = ''; return; }
+
+    var mainIndex = Math.min(window.admPhotoIndex || 0, photos.length - 1);
+    window.admPhotoIndex = mainIndex;
+
+    var html = '<div class="adm-photo-gallery"><div class="adm-photo-main-wrap">'
+      + '<img class="adm-photo-main" id="admPhotoMain" src="' + photos[mainIndex].url + '" alt="Foto -- antippen zum Vergrössern" onclick="openAdminPhotoViewer(window.admPhotoIndex)">';
+    if (editMode) {
+      html += '<button type="button" class="adm-photo-thumb__remove" onclick="removeAdminPhoto(' + photos[mainIndex].id + ')" aria-label="Foto löschen" title="Foto löschen"><i data-lucide="x" width="12" height="12"></i></button>';
+    }
+    html += '</div>';
+    if (photos.length > 1) {
+      html += '<div class="adm-photo-thumbs" id="admPhotoThumbs">';
+      photos.forEach(function (p, i) {
+        html += '<img src="' + p.url + '" alt="Foto ' + (i + 1) + '" class="' + (i === mainIndex ? 'active' : '') + '" onclick="selectAdminPhoto(' + i + ')">';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }
+
+  /* ---- Photo viewer -- same <dialog>/prev-next/counter pattern as velomelder-gelbes-band.html's
+     shared photo viewer, view-only (no remove action in here; that lives in the inline gallery
+     above, see renderPhotoGallery()). Navigates over visiblePhotos() so a photo staged for
+     deletion while editing drops out of the full viewer too, not just the inline gallery. */
+  var admPhotoViewerIndex = 0;
+  function openAdminPhotoViewer(startIndex) {
+    admPhotoViewerIndex = startIndex || 0;
+    renderAdminPhotoViewer();
+    var dialog = document.getElementById('admPhotoViewer');
+    if (!dialog.open) dialog.showModal();
+  }
+  function closeAdminPhotoViewer() {
+    document.getElementById('admPhotoViewer').close();
+  }
+  function renderAdminPhotoViewer() {
+    var urls = visiblePhotos().map(function (p) { return p.url; });
+    var url = urls[admPhotoViewerIndex];
+    if (!url) { closeAdminPhotoViewer(); return; }
+    document.getElementById('admPhotoViewerImg').src = url;
+    document.getElementById('admPhotoViewerPrev').disabled = admPhotoViewerIndex <= 0;
+    document.getElementById('admPhotoViewerNext').disabled = admPhotoViewerIndex >= urls.length - 1;
+    var counter = document.getElementById('admPhotoViewerCounter');
+    counter.classList.toggle('multi', urls.length > 1);
+    counter.textContent = (admPhotoViewerIndex + 1) + ' / ' + urls.length;
+  }
+  function adminPhotoViewerStep(delta) {
+    var urls = visiblePhotos().map(function (p) { return p.url; });
+    var next = admPhotoViewerIndex + delta;
+    if (next < 0 || next >= urls.length) return;
+    admPhotoViewerIndex = next;
+    renderAdminPhotoViewer();
+  }
+  window.openAdminPhotoViewer = openAdminPhotoViewer;
+  window.closeAdminPhotoViewer = closeAdminPhotoViewer;
+  window.adminPhotoViewerStep = adminPhotoViewerStep;
+  document.getElementById('admPhotoViewer').addEventListener('click', function (e) {
+    if (e.target === this) this.close(); // backdrop click, not the image/controls
+  });
+  document.addEventListener('keydown', function (e) {
+    if (!document.getElementById('admPhotoViewer').open) return;
+    if (e.key === 'ArrowLeft') adminPhotoViewerStep(-1);
+    if (e.key === 'ArrowRight') adminPhotoViewerStep(1);
+  });
+
+  /* ---- Rating editor (edit mode only) -- bar sits hidden alongside the read-only rating pill,
+     see ratingEditField/ratingAddressRow toggling in enterEditMode()/exitEditMode(). ---- */
+  var ratingEdit = document.getElementById('ratingEdit');
+  function selectRating(r) {
+    rating = r;
+    Array.prototype.slice.call(ratingEdit.querySelectorAll('button')).forEach(function (b) {
+      b.classList.toggle('is-selected', Number(b.dataset.r) === r);
+    });
+    marker.setIcon(makeIcon(rating));
+    checkEditDirty();
+  }
+  ratingEdit.querySelectorAll('button').forEach(function (btn) {
+    btn.addEventListener('click', function () { selectRating(Number(btn.dataset.r)); });
+  });
+
+  /* ---- Edit mode -- "Bearbeiten" snapshots the current field values, then swaps each read-only
+     element for its editable twin in place. "Verwerfen" restores the snapshot and exits without
+     ever contacting the server (nothing was persisted); "Speichern" PATCHes the changed fields
+     plus any photos marked for deletion in one request, then reloads so every view-mode element
+     (including ones this page doesn't edit, like the geocoded address) reflects the fresh,
+     saved state rather than being patched up by hand. ---- */
+  var nameField = document.getElementById('nameField');
+  var anonField = document.getElementById('anonField');
+  var commentField = document.getElementById('commentField');
+
+  function checkEditDirty() {
+    if (!fieldSnapshot) return;
+    var dirty = lat !== fieldSnapshot.lat || lng !== fieldSnapshot.lng || rating !== fieldSnapshot.rating
+      || nameField.value !== fieldSnapshot.name
+      || anonField.checked !== fieldSnapshot.anonymous
+      || commentField.value !== fieldSnapshot.comment
+      || Object.keys(deletedPhotoIds).length > 0;
+    document.getElementById('btnSaveEdit').disabled = !dirty;
+    document.getElementById('btnSaveEdit').title = dirty ? '' : 'Keine Änderungen zum Speichern';
+  }
+  nameField.addEventListener('input', checkEditDirty);
+  anonField.addEventListener('change', function () {
+    nameField.disabled = anonField.checked;
+    checkEditDirty();
+  });
+  commentField.addEventListener('input', checkEditDirty);
+
+  function enterEditMode() {
+    fieldSnapshot = { lat: lat, lng: lng, rating: rating, name: nameField.value, anonymous: anonField.checked, comment: commentField.value, address: address, addressDistanceM: addressDistanceM };
+    deletedPhotoIds = {};
+    editMode = true;
+    marker.dragging.enable();
+    document.getElementById('mapHint').hidden = false;
+    document.getElementById('ratingAddressRow').hidden = true;
+    document.getElementById('ratingEditField').hidden = false;
+    document.getElementById('bylineView').hidden = true;
+    document.getElementById('nameEditField').hidden = false;
+    document.getElementById('commentView').hidden = true;
+    document.getElementById('commentEditField').hidden = false;
+    document.getElementById('btnEdit').hidden = true;
+    document.getElementById('viewActions').hidden = true;
+    document.getElementById('editActions').hidden = false;
+    renderPhotoGallery();
+    checkEditDirty();
+  }
+
+  function exitEditMode(restore) {
+    if (restore && fieldSnapshot) {
+      lat = fieldSnapshot.lat; lng = fieldSnapshot.lng;
+      marker.setLatLng([lat, lng]);
+      var kv = document.getElementById('kvLatLng');
+      if (kv) kv.textContent = lat + ', ' + lng;
+      address = fieldSnapshot.address;
+      addressDistanceM = fieldSnapshot.addressDistanceM;
+      updateAddressDisplay();
+      nameField.value = fieldSnapshot.name;
+      anonField.checked = fieldSnapshot.anonymous;
+      nameField.disabled = fieldSnapshot.anonymous;
+      commentField.value = fieldSnapshot.comment;
+      selectRating(fieldSnapshot.rating);
+      deletedPhotoIds = {};
+    }
+    editMode = false;
+    fieldSnapshot = null;
+    marker.dragging.disable();
+    document.getElementById('mapHint').hidden = true;
+    document.getElementById('ratingAddressRow').hidden = false;
+    document.getElementById('ratingEditField').hidden = true;
+    document.getElementById('bylineView').hidden = false;
+    document.getElementById('nameEditField').hidden = true;
+    document.getElementById('commentView').hidden = false;
+    document.getElementById('commentEditField').hidden = true;
+    document.getElementById('btnEdit').hidden = false;
+    document.getElementById('viewActions').hidden = false;
+    document.getElementById('editActions').hidden = true;
+    renderPhotoGallery();
+  }
+
+  document.getElementById('btnEdit').addEventListener('click', enterEditMode);
+  document.getElementById('btnDiscardEdit').addEventListener('click', function () { exitEditMode(true); });
+  document.getElementById('btnSaveEdit').addEventListener('click', function () {
+    var body = {
+      lat: lat,
+      lng: lng,
+      rating: rating,
+      name: nameField.value,
+      anonymous: anonField.checked,
+      comment: commentField.value,
+      address: address,
+      addressDistanceM: addressDistanceM
+    };
+    var idsToDelete = Object.keys(deletedPhotoIds).map(Number);
+    if (idsToDelete.length) body.deletePhotoIds = idsToDelete;
+    submitPatch(body, function () {
+      window.location.reload();
+    });
+  });
+
+  renderPhotoGallery();
   if (typeof lucide !== 'undefined') lucide.createIcons();
 });
 </script>

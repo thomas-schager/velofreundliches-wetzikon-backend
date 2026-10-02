@@ -1432,7 +1432,12 @@ var lastGeocodedAddress   = null;
 var lastGeocodedDistanceM = null;
 
 function reverseGeocode(latlng) {
-  var url = 'https://photon.komoot.io/reverse?lon=' + latlng.lng + '&lat=' + latlng.lat + '&lang=de';
+  // &layer=house: without it, Photon just returns whatever OSM feature is nearest the exact point
+  // -- a street centerline, a waterway, anything -- so a pin dropped a few metres off a building
+  // silently loses its housenumber ("Bachtelstrasse" instead of "Bachtelstrasse 37"). Restricting
+  // to the house layer reliably finds the nearest addressable building instead; only genuinely
+  // address-less areas fall back to no housenumber.
+  var url = 'https://photon.komoot.io/reverse?lon=' + latlng.lng + '&lat=' + latlng.lat + '&lang=de&layer=house';
   fetch(url)
     .then(function(r) { return r.json(); })
     .then(function(data) {

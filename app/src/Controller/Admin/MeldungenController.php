@@ -15,7 +15,7 @@ use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * Twig-rendered moderation queue + detail page. The list/detail reads go straight through
- * ReportRepository (read-only, no business rule to share); the Speichern/Veröffentlichen/
+ * ReportRepository (read-only, no business rule to share); the Notiz speichern/Veröffentlichen/
  * Ablehnen actions on the detail page submit client-side to the same PATCH /admin/reports/{id}
  * JSON endpoint the API exposes, which is what actually calls ReportModerationService -- see
  * Controller\Api\AdminReportsController.
