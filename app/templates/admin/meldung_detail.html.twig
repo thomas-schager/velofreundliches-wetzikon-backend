@@ -437,6 +437,28 @@ document.addEventListener('DOMContentLoaded', function () {
     if (e.key === 'ArrowRight') adminPhotoViewerStep(1);
   });
 
+  // Swipe left/right to step through photos on touch devices -- same gesture/threshold as
+  // velomelder-gelbes-band.html's own photo viewer.
+  var admPhotoViewerTouchStartX = null;
+  var admPhotoViewerTouchStartY = null;
+  document.getElementById('admPhotoViewer').addEventListener('touchstart', function (e) {
+    if (e.touches.length !== 1) return;
+    admPhotoViewerTouchStartX = e.touches[0].clientX;
+    admPhotoViewerTouchStartY = e.touches[0].clientY;
+  }, { passive: true });
+  document.getElementById('admPhotoViewer').addEventListener('touchend', function (e) {
+    if (admPhotoViewerTouchStartX === null) return;
+    var touch = e.changedTouches[0];
+    var dx = touch.clientX - admPhotoViewerTouchStartX;
+    var dy = touch.clientY - admPhotoViewerTouchStartY;
+    admPhotoViewerTouchStartX = null;
+    admPhotoViewerTouchStartY = null;
+    // Mostly-horizontal and past a minimum distance, so an incidental vertical touch or a tap
+    // isn't mistaken for a navigation swipe.
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
+    adminPhotoViewerStep(dx < 0 ? 1 : -1);
+  }, { passive: true });
+
   /* ---- Rating editor (edit mode only) -- bar sits hidden alongside the read-only rating pill,
      see ratingEditField/ratingAddressRow toggling in enterEditMode()/exitEditMode(). ---- */
   var ratingEdit = document.getElementById('ratingEdit');

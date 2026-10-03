@@ -603,7 +603,7 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
           <label class="field-label" for="email-input"><span class="required" aria-label="Pflichtfeld">*</span>&nbsp;E-Mail</label>
           <input type="email" id="email-input" placeholder="name@beispiel.ch" autocomplete="email" inputmode="email" aria-required="true" aria-describedby="hint-email" />
           <div class="validation-hint" id="hint-email" role="alert">Bitte eine gültige E-Mail-Adresse eingeben.</div>
-          <p class="field-note">Wird nie angezeigt. Deine Meldung wird erst nach Bestätigung durch diese Adresse veröffentlicht.</p>
+          <p class="field-note">Wird nie öffentlich angezeigt. Deine Meldung wird erst nach Bestätigung durch diese Adresse geprüft und veröffentlicht.</p>
         </div>
 
         <div class="form-section">
@@ -1470,7 +1470,27 @@ function reverseGeocode(latlng) {
     });
 }
 
+// Deep-linking the create form the same way openDetailModal()/closeDetailModal() deep-link a
+// Meldung: pushState (not replaceState) on both open and close so the browser Back/Forward
+// buttons step through the form's open/closed state too, not just page navigation -- on mobile
+// this means Back closes the form instead of leaving the map/page entirely. Unlike ?meldung=<id>,
+// ?create has no server-side state to resurrect (the clicked point only lives in pendingLatLng,
+// not the URL), so forward-navigating back into a ?create state with the form already closed just
+// strips the flag again rather than trying to reopen it -- see the popstate listener below.
+function getCreateFromUrl() {
+  return new URLSearchParams(location.search).has('create');
+}
+function buildUrlWithCreate(isCreating) {
+  var params = new URLSearchParams(location.search);
+  if (isCreating) { params.set('create', '1'); } else { params.delete('create'); }
+  var qs = params.toString();
+  return location.pathname + (qs ? '?' + qs : '') + location.hash;
+}
+
 function openModal(latlng) {
+  if (!getCreateFromUrl()) {
+    history.pushState({ create: true }, '', buildUrlWithCreate(true));
+  }
   setFormFrozen(false);
   document.querySelector('.modal-left').scrollTop = 0;
   document.getElementById('modal-form-view').style.display = '';
@@ -1510,6 +1530,9 @@ function closeModal() {
   document.getElementById('modal-overlay').classList.remove('open');
   pendingLatLng = null; selectedRating = null; pendingPhotos = [];
   currentPreviewLayer = 'street';
+  if (getCreateFromUrl()) {
+    history.pushState({}, '', buildUrlWithCreate(false));
+  }
 }
 document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target === this) requestCloseModal(); });
 
@@ -1918,6 +1941,28 @@ document.addEventListener('keydown', function(e) {
   if (e.key === 'ArrowRight') photoViewerStep(1);
 });
 
+// Swipe left/right to step through photos on touch devices -- both view mode (detail popup) and
+// edit mode (upload preview) go through this same dialog, so one listener covers both.
+var photoViewerTouchStartX = null;
+var photoViewerTouchStartY = null;
+document.getElementById('photo-viewer').addEventListener('touchstart', function(e) {
+  if (e.touches.length !== 1) return;
+  photoViewerTouchStartX = e.touches[0].clientX;
+  photoViewerTouchStartY = e.touches[0].clientY;
+}, { passive: true });
+document.getElementById('photo-viewer').addEventListener('touchend', function(e) {
+  if (photoViewerTouchStartX === null) return;
+  var touch = e.changedTouches[0];
+  var dx = touch.clientX - photoViewerTouchStartX;
+  var dy = touch.clientY - photoViewerTouchStartY;
+  photoViewerTouchStartX = null;
+  photoViewerTouchStartY = null;
+  // Mostly-horizontal and past a minimum distance, so an incidental vertical touch or a tap isn't
+  // mistaken for a navigation swipe.
+  if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
+  photoViewerStep(dx < 0 ? 1 : -1);
+}, { passive: true });
+
 document.addEventListener('keydown', function(e) {
   if (e.key !== 'Escape') return;
   // The <dialog> handles its own Escape (native top-layer) -- don't also close what's underneath.
@@ -2136,6 +2181,12 @@ fetch(API_BASE + '/route-types')
       var entry = (reports || []).filter(function(r) { return r.id === deepLinkId; })[0];
       if (entry) openDetailModal(entry);
     }
+
+    // A stray ?create from a bookmarked/shared URL can't be restored (no clicked point to reopen
+    // the form with, see buildUrlWithCreate() above) -- drop it rather than leave a misleading URL.
+    if (getCreateFromUrl()) {
+      history.replaceState({}, '', buildUrlWithCreate(false));
+    }
   })
   .catch(function(err) {
     console.error('Failed to load map data', err);
@@ -2149,13 +2200,22 @@ window.addEventListener('popstate', function() {
   var id = getMeldungIdFromUrl();
   if (!id) {
     closeDetailModal();
-    return;
-  }
-  var entry = lastPublishedReports.filter(function(r) { return r.id === id; })[0];
-  if (entry) {
-    openDetailModal(entry);
   } else {
-    closeDetailModal();
+    var entry = lastPublishedReports.filter(function(r) { return r.id === id; })[0];
+    if (entry) {
+      openDetailModal(entry);
+    } else {
+      closeDetailModal();
+    }
+  }
+
+  // The create form has nothing to resurrect from the URL (see buildUrlWithCreate() above), so
+  // Back just closes it; a stray ?create reached by navigating Forward past an already-closed
+  // form is corrected away with replaceState rather than left dangling in the address bar.
+  if (!getCreateFromUrl()) {
+    if (document.getElementById('modal-overlay').classList.contains('open')) closeModal();
+  } else if (!document.getElementById('modal-overlay').classList.contains('open')) {
+    history.replaceState({}, '', buildUrlWithCreate(false));
   }
 });
 </script>
