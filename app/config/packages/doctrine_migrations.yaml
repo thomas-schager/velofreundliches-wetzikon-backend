@@ -4,3 +4,11 @@ doctrine_migrations:
         # as migrations classes should NOT be autoloaded
         'DoctrineMigrations': '%kernel.project_dir%/migrations'
     enable_profiler: false
+    # Every migration here does DDL (CREATE/ALTER/DROP TABLE), and MySQL/MariaDB always
+    # implicitly commits the current transaction when DDL runs -- so Doctrine's default
+    # single-transaction wrapper is already a no-op for this project (MySQL has no
+    # transactional DDL to protect in the first place), and trying to commit it again at the
+    # end of the migration throws "transaction is already committed" (deprecated in
+    # doctrine/migrations, becoming a hard error). See
+    # https://www.doctrine-project.org/projects/doctrine-migrations/en/stable/explanation/implicit-commits.html
+    transactional: false
