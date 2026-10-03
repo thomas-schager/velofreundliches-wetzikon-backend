@@ -23,6 +23,18 @@ final class Version20260904075016 extends AbstractMigration
         return 'Add route_backups table (pre-save GeoJSON snapshots for the route editor).';
     }
 
+    /**
+     * MySQL/MariaDB implicitly commits the current transaction on every DDL statement (CREATE
+     * TABLE here), so Doctrine's default single-transaction wrapper is never actually in effect
+     * for this migration -- it just throws a deprecation trying to commit an already-committed
+     * transaction at the end. See
+     * https://www.doctrine-project.org/projects/doctrine-migrations/en/stable/explanation/implicit-commits.html
+     */
+    public function isTransactional(): bool
+    {
+        return false;
+    }
+
     public function up(Schema $schema): void
     {
         $this->addSql(<<<'SQL'

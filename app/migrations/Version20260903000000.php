@@ -31,6 +31,18 @@ final class Version20260903000000 extends AbstractMigration
         return 'Baseline: create ratings, route_types, admin_users, auth_challenges, reports, report_photos, route_features (see database/schema.sql), and seed ratings/route_types.';
     }
 
+    /**
+     * MySQL/MariaDB implicitly commits the current transaction on every DDL statement (CREATE
+     * TABLE here), so Doctrine's default single-transaction wrapper is never actually in effect
+     * for this migration -- it just throws a deprecation trying to commit an already-committed
+     * transaction at the end. See
+     * https://www.doctrine-project.org/projects/doctrine-migrations/en/stable/explanation/implicit-commits.html
+     */
+    public function isTransactional(): bool
+    {
+        return false;
+    }
+
     public function up(Schema $schema): void
     {
         $this->addSql(<<<'SQL'
