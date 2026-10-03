@@ -2,8 +2,17 @@
 # Runs ON THE SERVER (piped over SSH by refresh-test-from-prod.sh, not executed locally).
 # Dumps production's database and restores it directly into testing's via one pipe -- both on
 # the same MariaDB host per internals.md, so this never touches disk or leaves the server.
-# mysqldump's default output includes DROP TABLE IF EXISTS + CREATE TABLE per table, which is
-# exactly the desired "wipe testing's tables, replace with production's" behaviour.
+#
+# Testing's existing tables are dropped first (see below), separately from the dump/restore
+# pipe -- mysqldump's own DROP TABLE IF EXISTS only covers tables that exist in the SOURCE
+# (production), not anything testing has that production doesn't. That gap matters here
+# specifically: testing routinely runs migrations ahead of production (deploy.sh test migrates
+# testing; promote.sh only later carries the same code/migrations to production), so a table a
+# migration already created on testing can survive untouched by this refresh while
+# doctrine_migration_versions gets overwritten with production's older history -- the next
+# migrate then tries to CREATE TABLE a table that's still physically there and aborts with
+# "Base table or view already exists". Dropping everything first makes testing a true replica of
+# production every time, regardless of what testing had before.
 set -euo pipefail
 
 PROD_APP_PATH="$1"
@@ -40,6 +49,16 @@ read_db_vars() {
 
 read_db_vars "$PROD_APP_PATH/.env.local" PROD
 read_db_vars "$TEST_APP_PATH/.env.local" TEST
+
+# Drop every table currently in testing before importing -- see the comment at the top of this
+# file. No DROP DATABASE here: a shared-hosting DB user (this account included) commonly can't
+# create/drop the database itself, only its tables, so this works regardless of that privilege.
+TEST_TABLES="$(MYSQL_PWD="$TEST_PASS" mysql -N -h "$TEST_HOST" -P "$TEST_PORT" -u "$TEST_USER" "$TEST_NAME" -e \
+    "SELECT GROUP_CONCAT(table_name) FROM information_schema.tables WHERE table_schema = '$TEST_NAME'")"
+if [[ -n "$TEST_TABLES" && "$TEST_TABLES" != "NULL" ]]; then
+    MYSQL_PWD="$TEST_PASS" mysql -h "$TEST_HOST" -P "$TEST_PORT" -u "$TEST_USER" "$TEST_NAME" -e \
+        "SET FOREIGN_KEY_CHECKS = 0; DROP TABLE IF EXISTS $TEST_TABLES; SET FOREIGN_KEY_CHECKS = 1;"
+fi
 
 MYSQL_PWD="$PROD_PASS" mysqldump --no-tablespaces --single-transaction \
     -h "$PROD_HOST" -P "$PROD_PORT" -u "$PROD_USER" "$PROD_NAME" \
