@@ -123,13 +123,14 @@ Deliberately simplified for this local-dev-only pass (documented here rather tha
 - **Anti-abuse** on `POST /reports` (`X-Challenge-Token`) is accepted but not verified — any
   value is treated as valid, per the task's explicit scope. Real hCaptcha/Turnstile verification
   is future work (see `docs/api-implementation-strategy.md` §5).
-- **Emails are real but plain text** — login/reset 2FA codes, the password-changed notice, and
-  the VeloMelder submission confirmation link all send via a real SMTP account (Hostpoint,
-  `MAILER_DSN` in `app/.env.local`, not committed). No HTML templates/branded copy yet — see
-  `app/src/Service/AuthService.php` and `app/src/Service/ReportSubmissionService.php`. As a
-  local-dev convenience only, the 2FA code is also logged via Monolog (`app/var/log/dev.log`) and,
-  in the `dev` environment only, shown directly on the verify page as a "Dev-Modus" fallback in
-  case a mail doesn't arrive.
+- **Emails are real**, via a real SMTP account (Hostpoint, `MAILER_DSN` in `app/.env.local`, not
+  committed). The login 2FA code and the VeloMelder submission confirmation link are branded HTML
+  (+ plain-text fallback) templates — see `app/templates/emails/login_code.*.twig` and
+  `report_confirmation.*.twig`. The password-reset 2FA code and the password-changed notice are
+  still plain text for now — see `app/src/Service/AuthService.php`. As a local-dev convenience
+  only, the 2FA code is also logged via Monolog (`app/var/log/dev.log`) and, in the `dev`
+  environment only, shown directly on the verify page as a "Dev-Modus" fallback in case a mail
+  doesn't arrive.
 - **Automated-test email bypass**: a request to `/auth/login` or `/auth/forgot-password` carrying
   header `X-Test-Bypass-Token: <APP_TEST_BYPASS_TOKEN from .env.local>` skips the real email send
   entirely and writes the code to `app/var/test-2fa-code.txt` instead — only active in the `dev`

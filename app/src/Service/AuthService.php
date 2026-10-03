@@ -14,9 +14,11 @@ use DateInterval;
 use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
+use Symfony\Bridge\Twig\Mime\TemplatedEmail;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Symfony\Component\Mailer\MailerInterface;
+use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 
@@ -26,11 +28,13 @@ use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
  * that same API -- see docs/api-implementation-strategy.md §3.1 for why this must be one code
  * path per business action.
  *
- * Emails are real (see MAILER_DSN in .env.local -- Hostpoint SMTP) but deliberately plain text
- * for now, no HTML/branded templates yet (see README.md's Status section). The 6-digit code is
- * additionally logged via Monolog in dev, and this service returns the plaintext code so the
- * verify page's dev-mode banner still works as a local-testing fallback -- see AuthController /
- * templates/auth/verify.html.twig.
+ * Emails are real (see MAILER_DSN in .env.local -- Hostpoint SMTP). The login 2FA code is a
+ * branded HTML (+ plain-text fallback) TemplatedEmail, same pattern as
+ * ReportSubmissionService's confirmation e-mail -- see templates/emails/login_code.*.twig. The
+ * password-reset 2FA code and the password-changed notice are still plain text for now (see
+ * README.md's Status section). The 6-digit code is additionally logged via Monolog in dev, and
+ * this service returns the plaintext code so the verify page's dev-mode banner still works as a
+ * local-testing fallback -- see AuthController / templates/auth/verify.html.twig.
  *
  * Automated-test email bypass: a caller that sends the current APP_TEST_BYPASS_TOKEN (see
  * .env.local) gets its code written to var/test-2fa-code.txt instead of emailed -- see
@@ -186,7 +190,7 @@ class AuthService
         $this->em->flush();
 
         if ($user !== null) {
-            $this->sendCodeEmail($user->getEmail(), $code, $purpose, $testBypassToken);
+            $this->sendCodeEmail($user->getEmail(), $user->getDisplayName(), $code, $purpose, $testBypassToken);
         }
 
         return [$challenge, $code];
@@ -220,11 +224,12 @@ class AuthService
     }
 
     /**
-     * Plain-text only for now (see class docblock). Subject/body differ by purpose so a login
-     * code and a password-reset code are never visually interchangeable in an inbox -- someone
-     * who didn't request a password reset should immediately recognise the mail as wrong.
+     * Login codes get the branded HTML template (login_code.*.twig); password-reset codes stay
+     * plain text for now (see class docblock). Subject/body differ by purpose either way, so a
+     * login code and a password-reset code are never visually interchangeable in an inbox --
+     * someone who didn't request a password reset should immediately recognise the mail as wrong.
      */
-    private function sendCodeEmail(string $to, string $code, string $purpose, ?string $testBypassToken = null): void
+    private function sendCodeEmail(string $to, string $displayName, string $code, string $purpose, ?string $testBypassToken = null): void
     {
         if ($this->isTestBypass($testBypassToken)) {
             $this->writeTestBypassFile($purpose, $code);
@@ -233,28 +238,34 @@ class AuthService
             return;
         }
 
-        if ($purpose === AuthChallenge::PURPOSE_PASSWORD_RESET) {
-            $subject = 'Code zum Zurücksetzen des Passworts';
-            $body = "Sie haben ein neues Passwort für Ihr Konto im Velofreundliches-Wetzikon-Backend angefordert.\n\n"
-                . "Ihr 6-stelliger Code lautet: {$code}\n"
-                . "Gültig für " . self::CHALLENGE_TTL_MINUTES . " Minuten.\n\n"
-                . "Falls Sie dies nicht angefordert haben, ignorieren Sie diese E-Mail -- Ihr Passwort bleibt unverändert.\n\n"
-                . "Velofreundliches Wetzikon";
-        } else {
-            $subject = 'Ihr Anmeldecode';
-            $body = "Jemand hat versucht, sich mit Ihrer E-Mail-Adresse im Velofreundliches-Wetzikon-Backend anzumelden.\n\n"
-                . "Ihr 6-stelliger Code lautet: {$code}\n"
-                . "Gültig für " . self::CHALLENGE_TTL_MINUTES . " Minuten.\n\n"
-                . "Falls Sie dies nicht waren, können Sie diese E-Mail ignorieren -- ohne den Code kann sich niemand anmelden.\n\n"
-                . "Velofreundliches Wetzikon";
-        }
+        $from = new Address('notifications@velofreundliches-wetzikon.ch', 'Velofreundliches Wetzikon');
 
         try {
-            $this->mailer->send((new Email())
-                ->from('notifications@velofreundliches-wetzikon.ch')
-                ->to($to)
-                ->subject($subject)
-                ->text($body));
+            if ($purpose === AuthChallenge::PURPOSE_PASSWORD_RESET) {
+                $body = "Du hast ein neues Passwort für dein Konto im Velofreundliches-Wetzikon-Backend angefordert.\n\n"
+                    . "Dein 6-stelliger Code lautet: {$code}\n"
+                    . "Gültig für " . self::CHALLENGE_TTL_MINUTES . " Minuten.\n\n"
+                    . "Falls du das nicht angefordert hast, kannst du diese E-Mail ignorieren -- dein Passwort bleibt unverändert.\n\n"
+                    . "Velofreundliches Wetzikon";
+
+                $this->mailer->send((new Email())
+                    ->from($from)
+                    ->to($to)
+                    ->subject('Code zum Zurücksetzen des Passworts')
+                    ->text($body));
+            } else {
+                $this->mailer->send((new TemplatedEmail())
+                    ->from($from)
+                    ->to($to)
+                    ->subject('Dein Anmeldecode')
+                    ->htmlTemplate('emails/login_code.html.twig')
+                    ->textTemplate('emails/login_code.txt.twig')
+                    ->context([
+                        'name' => $displayName,
+                        'code' => $code,
+                        'ttlMinutes' => self::CHALLENGE_TTL_MINUTES,
+                    ]));
+            }
         } catch (TransportExceptionInterface $e) {
             $this->logger->warning('Could not send 2FA code email', ['exception' => $e->getMessage()]);
         }
@@ -270,10 +281,10 @@ class AuthService
             $this->mailer->send((new Email())
                 ->from('notifications@velofreundliches-wetzikon.ch')
                 ->to($to)
-                ->subject('Ihr Passwort wurde geändert')
+                ->subject('Dein Passwort wurde geändert')
                 ->text(
-                    "Das Passwort für Ihr Konto im Velofreundliches-Wetzikon-Backend wurde soeben geändert.\n\n"
-                    . "Falls Sie das nicht waren, kontaktieren Sie umgehend die Redaktion.\n\n"
+                    "Das Passwort für dein Konto im Velofreundliches-Wetzikon-Backend wurde soeben geändert.\n\n"
+                    . "Falls du das nicht warst, kontaktiere umgehend die Redaktion.\n\n"
                     . "Velofreundliches Wetzikon"
                 ));
         } catch (TransportExceptionInterface $e) {
@@ -291,7 +302,7 @@ class AuthService
             throw new ExpiredChallengeException('Code expired -- request a new one.');
         }
         if ($challenge->getAttempts() >= self::MAX_ATTEMPTS) {
-            throw new InvalidChallengeException('Zu viele Versuche. Bitte fordern Sie einen neuen Code an.');
+            throw new InvalidChallengeException('Zu viele Versuche. Bitte fordere einen neuen Code an.');
         }
 
         if (!password_verify($code, $challenge->getCodeHash())) {
