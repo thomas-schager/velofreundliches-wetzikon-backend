@@ -2,13 +2,14 @@
 # Deploys the current local working tree to either the testing or production environment.
 # Fixed, real directories on the server -- no releases/current/symlinks, see DEPLOY.md.
 #
-# Usage: ./deploy/deploy.sh test|production
+# Usage: ./deploy/deploy.sh test|production [--no-refresh]
 #
 # What happens, in order:
 #   1. check the PHP version pinned in public/.htaccess matches deploy.env's PHP_VERSION
 #   2. (production only) require typing "production" to continue
-#   3. (test only) refresh testing's database + uploads from production, see
-#      refresh-test-from-prod.sh -- matches internals.md's stated deploy principle
+#   3. (test only, skipped if --no-refresh) refresh testing's database + uploads from
+#      production, see refresh-test-from-prod.sh -- matches internals.md's stated deploy
+#      principle
 #   4. build vendor/ locally, rsync the code into the target's fixed app/ directory
 #   5. enter maintenance mode on the target (after the copy -- see the comment on
 #      enter_maintenance's call site below for why not before)
@@ -17,6 +18,14 @@
 #   8. run the migrations for real
 #   9. leave maintenance mode -- cleared on success, left on with recovery instructions printed
 #      on failure, so a broken deploy is never visible
+#
+# --no-refresh (test only): skips step 3, so testing's database and public/uploads/ are left
+# exactly as they are instead of being overwritten from production -- for pushing a code change
+# to testing without losing data you've accumulated there (test reports/photos that only exist
+# on testing, not production). Steps 4-9 (code, migrations) still run as normal. Trade-off: you
+# lose the "every attempt begins from the same real baseline" guarantee this script otherwise
+# gives you (DEPLOY.md) -- migrations run against whatever testing currently has, not a fresh
+# copy of production, so this is meant as an occasional opt-in, not the default workflow.
 set -euo pipefail
 
 DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,9 +37,20 @@ source "$DEPLOY_DIR/lib.sh"
 
 TARGET="${1:-}"
 if [[ "$TARGET" != "test" && "$TARGET" != "production" ]]; then
-    echo "Usage: $0 test|production" >&2
+    echo "Usage: $0 test|production [--no-refresh]" >&2
     exit 1
 fi
+
+SECOND_ARG="${2:-}"
+if [[ -n "$SECOND_ARG" && "$SECOND_ARG" != "--no-refresh" ]]; then
+    echo "Usage: $0 test|production [--no-refresh]" >&2
+    exit 1
+fi
+if [[ "$SECOND_ARG" == "--no-refresh" && "$TARGET" != "test" ]]; then
+    echo "ERROR: --no-refresh only applies to 'test' -- production never auto-refreshes from anything." >&2
+    exit 1
+fi
+SKIP_REFRESH="$SECOND_ARG"
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
     echo "Missing $CONFIG_FILE -- copy deploy.env.example to deploy.env and fill in your values." >&2
@@ -97,8 +117,13 @@ echo "==> Verifying $BASE_PATH points at the expected database"
 check_db_name "$BASE_PATH" "$EXPECTED_DB_NAME"
 
 if [[ "$TARGET" == "test" ]]; then
-    echo "==> Refreshing testing's database and uploads from production"
-    "$DEPLOY_DIR/refresh-test-from-prod.sh"
+    if [[ "$SKIP_REFRESH" == "--no-refresh" ]]; then
+        echo "==> Skipping refresh (--no-refresh): testing's database and public/uploads/ are left as-is"
+        echo "    Migrations will run against testing's current state, not a fresh copy of production."
+    else
+        echo "==> Refreshing testing's database and uploads from production"
+        "$DEPLOY_DIR/refresh-test-from-prod.sh"
+    fi
 fi
 
 echo "==> Building locally (composer install --no-dev)"

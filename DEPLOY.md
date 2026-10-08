@@ -133,6 +133,15 @@ No confirmation prompt for testing itself (it's meant to be overwritten every ti
 pending migration looks destructive, in which case it stops and asks for `DESTROY` regardless of
 environment.
 
+**`./deploy/deploy.sh test --no-refresh`** skips the refresh step, leaving testing's database and
+`public/uploads/` exactly as they are instead of overwriting them from production — use this to
+push a code change to testing without losing data that only exists there (test reports/photos
+never promoted to production). Everything else (code sync, migrations, maintenance mode, backup,
+destructive-migration check) still runs as normal. Trade-off: testing is no longer guaranteed to
+match production before your change lands, so treat this as an occasional opt-in, not the default
+way to deploy to testing. Production is unaffected either way — it never auto-refreshes from
+anything, and the flag is rejected if you pass it there.
+
 **First deploy only:** migrations create `admin_users` empty — nothing seeds an actual account
 (unlike `ratings`/`route_types`, which the baseline migration seeds directly). Nobody can log in
 until you create one by hand, once, over SSH:
