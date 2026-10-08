@@ -106,7 +106,7 @@
             {% elseif report.status == 'pending_review' %}
               <span class="adm-badge adm-badge--new"><span class="adm-badge__dot"></span>Neu</span>
             {% else %}
-              <span class="adm-badge"><span class="adm-badge__dot"></span>Ausstehend (E-Mail)</span>
+              <span class="adm-badge"><span class="adm-badge__dot"></span>E-Mail nicht bestätigt</span>
             {% endif %}
           </span>
           <span class="adm-detail-received">Eingegangen {{ report.createdAt|date('d.m.Y, H:i') }} Uhr</span>

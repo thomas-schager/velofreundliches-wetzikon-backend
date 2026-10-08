@@ -356,7 +356,15 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
 .adm-detail-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-6); }
 @media (min-width: 1080px) { .adm-detail-grid { grid-template-columns: 1fr 380px; align-items: start; } }
 
-.adm-detail-map { height: 260px; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--color-border); background: var(--color-surface-2); margin-bottom: var(--space-5); position: relative; }
+/* z-index: 0 (with position: relative) deliberately creates a new stacking context here --
+   without it, Leaflet's own internal panes/controls (z-index up to 1000, see the comment below)
+   aren't just confined to this box, they compete directly against unrelated page chrome like
+   .adm-topbar (z-index: 100) once this map scrolls up underneath it, and win -- the map paints
+   over the sticky header instead of being hidden behind it. Scoping the stacking context to this
+   element means everything inside it (tiles, controls, .adm-map-hint) now only ever stacks
+   relative to each other and to this box's own z-index: 0, never past it. Same fix applied to
+   .adm-route-map-wrap (routes.html.twig) for the route editor's map. */
+.adm-detail-map { height: 260px; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--color-border); background: var(--color-surface-2); margin-bottom: var(--space-5); position: relative; z-index: 0; }
 /* z-index: 1000 for the same reason .map-toggle needs it -- Leaflet's own panes inside #meldungMap
    otherwise paint over a plain sibling despite DOM order. */
 .adm-detail-map .adm-map-hint { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 1000; background: rgba(0,0,0,0.72); color: #fff; font: 400 12px var(--font-body); padding: 6px 12px; border-radius: 999px; pointer-events: none; }
@@ -518,7 +526,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
 .adm-routes-col { flex: 0 0 240px; min-width: 0; background: #fff; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow-y: auto; overflow-x: hidden; }
 .adm-routes-col--backups { flex-basis: 280px; }
 
-.adm-route-map-wrap { position: relative; flex: 1 1 auto; min-width: 0; height: 100%; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--color-border); }
+/* z-index: 0 contains Leaflet's internal panes/controls to this box -- same fix and reasoning as
+   .adm-detail-map above (meldung_detail.html.twig); see the comment there. */
+.adm-route-map-wrap { position: relative; z-index: 0; flex: 1 1 auto; min-width: 0; height: 100%; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--color-border); }
 #routesMap { width: 100%; height: 100%; background: var(--color-surface-2); }
 #routesMap.is-drawing, #routesMap.is-editing { cursor: crosshair; }
 
