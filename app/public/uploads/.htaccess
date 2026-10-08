@@ -11,3 +11,15 @@
         Deny from all
     </FilesMatch>
 </IfModule>
+
+# Every file here is immutable once written -- PhotoConversionService gives each upload a fresh
+# random filename and nothing ever overwrites one in place (see ReportSubmissionService) -- so a
+# year-long, "immutable" cache is safe: a browser that already has a given file will never need
+# to re-check or re-fetch it.
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresDefault "access plus 1 year"
+</IfModule>
+<IfModule mod_headers.c>
+    Header set Cache-Control "public, max-age=31536000, immutable"
+</IfModule>

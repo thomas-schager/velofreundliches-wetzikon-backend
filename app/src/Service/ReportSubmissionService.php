@@ -205,7 +205,7 @@ class ReportSubmissionService
         return $report;
     }
 
-    /** @param string[] $photoBlobs WebP-encoded image data, already converted via PhotoConversionService */
+    /** @param array<array{large: string, display: string}> $photoBlobs already converted via PhotoConversionService */
     private function storePhotos(Report $report, array $photoBlobs): void
     {
         if ($photoBlobs === []) {
@@ -216,12 +216,18 @@ class ReportSubmissionService
         $targetDir = $this->uploadsDir . '/reports/' . $report->getId();
         $fs->mkdir($targetDir);
 
-        foreach (array_values($photoBlobs) as $i => $blob) {
-            $filename = bin2hex(random_bytes(8)) . '.webp';
-            $fs->dumpFile($targetDir . '/' . $filename, $blob);
+        foreach (array_values($photoBlobs) as $i => $blobs) {
+            // Same random id for both files of one photo, distinguished only by suffix -- keeps
+            // the pair visibly related on disk instead of two unrelated-looking filenames.
+            $baseFilename = bin2hex(random_bytes(8));
+            $largeFilename = $baseFilename . '.webp';
+            $displayFilename = $baseFilename . '-display.webp';
+            $fs->dumpFile($targetDir . '/' . $largeFilename, $blobs['large']);
+            $fs->dumpFile($targetDir . '/' . $displayFilename, $blobs['display']);
 
             $photo = new ReportPhoto();
-            $photo->setUrl('/uploads/reports/' . $report->getId() . '/' . $filename)
+            $photo->setUrl('/uploads/reports/' . $report->getId() . '/' . $largeFilename)
+                ->setDisplayUrl('/uploads/reports/' . $report->getId() . '/' . $displayFilename)
                 ->setSortOrder($i);
             $report->addPhoto($photo);
             $this->em->persist($photo);

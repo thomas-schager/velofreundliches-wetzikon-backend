@@ -25,6 +25,14 @@ class ReportPhoto
     #[ORM\Column(name: 'url', type: 'string', length: 500)]
     private string $url;
 
+    /**
+     * The smaller/lower-quality variant (see PhotoConversionService), used everywhere except the
+     * full-screen lightbox -- nullable because photos uploaded before this column existed only
+     * have the one (now "large") file; ReportPresenter falls back to `url` for those.
+     */
+    #[ORM\Column(name: 'display_url', type: 'string', length: 500, nullable: true)]
+    private ?string $displayUrl = null;
+
     #[ORM\Column(name: 'sort_order', type: 'smallint', options: ['unsigned' => true])]
     private int $sortOrder = 0;
 
@@ -61,6 +69,19 @@ class ReportPhoto
     public function setUrl(string $url): static
     {
         $this->url = $url;
+
+        return $this;
+    }
+
+    /** Falls back to the large `url` for photos uploaded before this column existed. */
+    public function getDisplayUrl(): string
+    {
+        return $this->displayUrl ?? $this->url;
+    }
+
+    public function setDisplayUrl(?string $displayUrl): static
+    {
+        $this->displayUrl = $displayUrl;
 
         return $this;
     }

@@ -682,7 +682,7 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
     <svg width="16" height="16" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><line x1="1" y1="1" x2="13" y2="13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><line x1="13" y1="1" x2="1" y2="13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
   </button>
   <button class="photo-viewer-nav photo-viewer-prev" id="photo-viewer-prev" onclick="photoViewerStep(-1)" type="button" aria-label="Vorheriges Foto">&#8249;</button>
-  <img class="photo-viewer-img" id="photo-viewer-img" src="" alt="Foto" />
+  <img class="photo-viewer-img" id="photo-viewer-img" src="" alt="Foto" loading="lazy" decoding="async" />
   <button class="photo-viewer-nav photo-viewer-next" id="photo-viewer-next" onclick="photoViewerStep(1)" type="button" aria-label="Nächstes Foto">&#8250;</button>
   <div class="photo-viewer-footer">
     <span class="photo-viewer-counter" id="photo-viewer-counter"></span>
@@ -735,7 +735,7 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
       <div class="detail-photos" id="detail-photos" style="display:none">
         <div class="detail-gallery">
           <div class="detail-photo-main-wrap">
-            <img class="detail-photo-main" id="detail-photo-main" src="" alt="Foto -- antippen zum Vergrössern" onclick="openDetailPhotoViewer()" />
+            <img class="detail-photo-main" id="detail-photo-main" src="" alt="Foto -- antippen zum Vergrössern" onclick="openDetailPhotoViewer()" loading="lazy" decoding="async" />
           </div>
           <div class="detail-photo-thumbs" id="detail-photo-thumbs"></div>
         </div>
@@ -1126,17 +1126,20 @@ function initDetailMap(entry) {
   setTimeout(function() { detailMap.invalidateSize(); }, 80);
 }
 
+// Entries are { url, displayUrl } objects (see ReportPresenter) -- url is the full-size "large"
+// variant (only the lightbox/full viewer uses it), displayUrl the smaller/lower-quality one this
+// inline gallery always prefers.
 var currentDetailPhotos = [];
 var currentDetailPhotoIndex = 0;
 
 function selectDetailPhoto(i) {
   currentDetailPhotoIndex = i;
-  document.getElementById('detail-photo-main').src = currentDetailPhotos[i];
+  document.getElementById('detail-photo-main').src = currentDetailPhotos[i].displayUrl;
   document.querySelectorAll('#detail-photo-thumbs img').forEach(function(t, idx) { t.classList.toggle('active', idx === i); });
 }
 
 function openDetailPhotoViewer() {
-  openPhotoViewer(currentDetailPhotos.map(function(u) { return { url: u }; }), currentDetailPhotoIndex, 'view');
+  openPhotoViewer(currentDetailPhotos.map(function(p) { return { url: p.url }; }), currentDetailPhotoIndex, 'view');
 }
 
 // Deep-linking: the URL's ?meldung=<id> mirrors whichever detail modal is open, so a reporter can
@@ -1196,12 +1199,14 @@ function openDetailModal(entry) {
   currentDetailPhotoIndex = 0;
   if (entry.photos && entry.photos.length) {
     photosEl.style.display = 'block';
-    document.getElementById('detail-photo-main').src = entry.photos[0];
+    document.getElementById('detail-photo-main').src = entry.photos[0].displayUrl;
     if (entry.photos.length > 1) {
       thumbsEl.style.display = 'flex';
-      entry.photos.forEach(function(url, i) {
+      entry.photos.forEach(function(photo, i) {
         var img = document.createElement('img');
-        img.src = url;
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.src = photo.displayUrl;
         img.alt = 'Foto ' + (i + 1);
         if (i === 0) img.className = 'active';
         img.addEventListener('click', function() { selectDetailPhoto(i); });
@@ -1860,7 +1865,7 @@ function handleFiles(files) {
 function renderThumb(id, dataUrl) {
   var container = document.getElementById('photo-previews');
   var div = document.createElement('div'); div.className = 'photo-thumb'; div.id = 'thumb-' + id;
-  var img = document.createElement('img'); img.src = dataUrl; img.alt = 'Vorschau'; img.onclick = function() { openUploadPhotoViewer(id); };
+  var img = document.createElement('img'); img.decoding = 'async'; img.src = dataUrl; img.alt = 'Vorschau'; img.onclick = function() { openUploadPhotoViewer(id); };
   var btn = document.createElement('button'); btn.className = 'photo-thumb-remove'; btn.title = 'Entfernen';
   // An SVG cross, not the '&times;' glyph -- that character's own font metrics don't sit centered
   // within its line box in most fonts, so it looks off-center inside a circle no matter how the
@@ -2056,7 +2061,14 @@ function submitEntry() {
   xhr.open('POST', API_BASE + '/reports');
   xhr.setRequestHeader('X-Challenge-Token', challengeToken);
   xhr.upload.addEventListener('progress', function(e) {
-    if (e.lengthComputable) setSubmitProgress(e.loaded / e.total * 100);
+    if (e.lengthComputable) setSubmitProgress(e.loaded / e.total * UPLOAD_PHASE_MAX_PCT);
+  });
+  // Upload bytes finishing isn't the server finishing -- it still has to resize+WebP-encode
+  // every photo (PhotoConversionService) before the response comes back. Without this, the bar
+  // would sit at 100% doing nothing for however long that takes, which reads as broken/frozen.
+  xhr.upload.addEventListener('load', function() {
+    setSubmitProgress(UPLOAD_PHASE_MAX_PCT);
+    startProcessingPhase(estimateProcessingMs(pendingPhotos.length));
   });
   xhr.addEventListener('load', function() {
     var ok = xhr.status >= 200 && xhr.status < 300;
@@ -2113,10 +2125,23 @@ function submitEntry() {
   }
 }
 
-// Real progress, driven by xhr.upload's "progress" event in submitEntry() -- the bar reflects
-// actual bytes sent, not a guess. If the browser can't report a length (e.lengthComputable
-// false; rare for a FormData body), the bar just stays at 0% until finishSubmitProgress() snaps
-// it -- still correct, just less informative for that one request.
+// Two phases, not one straight 0-100%:
+//   1. Upload (0 -> UPLOAD_PHASE_MAX_PCT) -- real progress, driven by xhr.upload's "progress"
+//      event in submitEntry(), reflecting actual bytes sent. If the browser can't report a
+//      length (e.lengthComputable false; rare for a FormData body), the bar just stays at 0%
+//      until the upload's own "load" event forces it to UPLOAD_PHASE_MAX_PCT.
+//   2. Processing (UPLOAD_PHASE_MAX_PCT -> PROCESSING_PHASE_MAX_PCT) -- once every byte has
+//      reached the server, it still has to resize+WebP-encode each photo (see
+//      PhotoConversionService) before responding, and there's no event for that -- nothing
+//      reports server-side progress back to the browser. startProcessingPhase() fakes it: an
+//      asymptotic creep that covers most of the gap by the estimated time but, deliberately,
+//      never reaches PROCESSING_PHASE_MAX_PCT on its own -- only the real response arriving
+//      (finishSubmitProgress()) ever snaps the bar to the true 100%, so a wrong estimate makes
+//      the pacing look a bit off, never makes the bar lie about being done.
+var UPLOAD_PHASE_MAX_PCT = 85;
+var PROCESSING_PHASE_MAX_PCT = 97;
+var processingInterval = null;
+
 function startSubmitProgress() {
   var bar = document.getElementById('submit-progress');
   var fill = document.getElementById('submit-progress-fill');
@@ -2126,7 +2151,32 @@ function startSubmitProgress() {
 function setSubmitProgress(pct) {
   document.getElementById('submit-progress-fill').style.width = Math.max(0, Math.min(100, pct)) + '%';
 }
+// ~1000ms base (validation, DB write, confirmation e-mail) plus ~1600ms per photo -- measured
+// directly (PhotoConversionService::convertToWebp() end-to-end, local dev hardware) against real
+// uploaded-photo samples at full 12MP phone-camera resolution: ~1.3s for a simple/fast-compressing
+// scene, ~2.3s for a detailed one, now that every photo gets resized+WebP-encoded twice (large +
+// display, see that service). Picked 1600ms/photo to sit mid-range and leave some headroom for
+// production hardware being slower than this dev machine -- a measured range, not a blind guess,
+// but still only an estimate. A report with no photos still gets the base estimate; the 5-photo
+// max tops out around 9s. Easy to recalibrate later (just these two numbers).
+function estimateProcessingMs(photoCount) {
+  return 1000 + photoCount * 1600;
+}
+function startProcessingPhase(estimatedMs) {
+  // Exponential approach to PROCESSING_PHASE_MAX_PCT: fraction-of-gap-covered(t) = 1 - e^(-t/tau).
+  // Solving for tau so that fraction(estimatedMs) = 0.85 (covers most of the gap right around the
+  // estimate, then keeps creeping slower if the real response takes longer instead of stalling).
+  var tau = estimatedMs / 1.897; // 1.897 ≈ -ln(0.15)
+  var start = Date.now();
+  clearInterval(processingInterval);
+  processingInterval = setInterval(function() {
+    var fraction = 1 - Math.exp(-(Date.now() - start) / tau);
+    setSubmitProgress(UPLOAD_PHASE_MAX_PCT + (PROCESSING_PHASE_MAX_PCT - UPLOAD_PHASE_MAX_PCT) * fraction);
+  }, 100);
+}
 function finishSubmitProgress(ok) {
+  clearInterval(processingInterval);
+  processingInterval = null;
   var bar = document.getElementById('submit-progress');
   var fill = document.getElementById('submit-progress-fill');
   if (ok) {

@@ -34,7 +34,9 @@ class ReportPresenter
             'lng' => $report->getLng(),
             'rating' => $report->getRating(),
             'comment' => $report->getComment(),
-            'photos' => array_map(static fn ($p) => $p->getUrl(), $report->getPhotos()->toArray()),
+            // url = "large" (full-screen lightbox only), displayUrl = smaller/lower-quality
+            // (everywhere else -- thumbnails, the "main" preview) -- see PhotoConversionService.
+            'photos' => array_map(static fn ($p) => ['url' => $p->getUrl(), 'displayUrl' => $p->getDisplayUrl()], $report->getPhotos()->toArray()),
             'name' => $report->isAnonymous() ? null : $report->getName(),
             'anonymous' => $report->isAnonymous(),
             'address' => $report->getAddress(),

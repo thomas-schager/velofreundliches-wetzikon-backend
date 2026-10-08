@@ -606,7 +606,18 @@ components:
         lng: { type: number, format: float }
         rating: { type: integer, minimum: 1, maximum: 5 }
         comment: { type: string }
-        photos: { type: array, items: { type: string, format: uri } }
+        photos:
+          type: array
+          items:
+            type: object
+            description: >-
+              Two sizes per photo (see PhotoConversionService): `url` is the full-size "large"
+              variant, meant only for a zoomed-in/full-screen view; `displayUrl` is a smaller,
+              lower-quality variant for everything else (thumbnails, inline previews) and should
+              be preferred by default.
+            properties:
+              url: { type: string, format: uri }
+              displayUrl: { type: string, format: uri }
         name: { type: string, nullable: true }
         anonymous: { type: boolean }
         address: { type: string, nullable: true }

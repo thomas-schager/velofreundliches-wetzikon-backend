@@ -152,7 +152,7 @@
     <svg width="16" height="16" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><line x1="1" y1="1" x2="13" y2="13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><line x1="13" y1="1" x2="1" y2="13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
   </button>
   <button class="adm-photo-viewer-nav adm-photo-viewer-prev" id="admPhotoViewerPrev" onclick="adminPhotoViewerStep(-1)" type="button" aria-label="Vorheriges Foto">&#8249;</button>
-  <img class="adm-photo-viewer-img" id="admPhotoViewerImg" src="" alt="Foto" />
+  <img class="adm-photo-viewer-img" id="admPhotoViewerImg" src="" alt="Foto" loading="lazy" decoding="async" />
   <button class="adm-photo-viewer-nav adm-photo-viewer-next" id="admPhotoViewerNext" onclick="adminPhotoViewerStep(1)" type="button" aria-label="Nächstes Foto">&#8250;</button>
   <div class="adm-photo-viewer-footer">
     <span class="adm-photo-viewer-counter" id="admPhotoViewerCounter"></span>
@@ -172,7 +172,9 @@ document.addEventListener('DOMContentLoaded', function () {
   var address = {{ report.address ? report.address|json_encode|raw : 'null' }};
   var addressDistanceM = {{ report.addressDistanceM is not null ? report.addressDistanceM : 'null' }};
   var ratingColors = {{ rating_colors|json_encode|raw }};
-  var reportPhotos = {{ report.photos|map(p => {'id': p.id, 'url': p.url})|json_encode|raw }};
+  // url = "large" (full-screen lightbox only), displayUrl = smaller/lower-quality (the inline
+  // gallery below always prefers it) -- see PhotoConversionService.
+  var reportPhotos = {{ report.photos|map(p => {'id': p.id, 'url': p.url, 'displayUrl': p.displayUrl})|json_encode|raw }};
   var deletedPhotoIds = {};
   var editMode = false;
   var fieldSnapshot = null;
@@ -376,7 +378,7 @@ document.addEventListener('DOMContentLoaded', function () {
     window.admPhotoIndex = mainIndex;
 
     var html = '<div class="adm-photo-gallery"><div class="adm-photo-main-wrap">'
-      + '<img class="adm-photo-main" id="admPhotoMain" src="' + photos[mainIndex].url + '" alt="Foto -- antippen zum Vergrössern" onclick="openAdminPhotoViewer(window.admPhotoIndex)">';
+      + '<img class="adm-photo-main" id="admPhotoMain" src="' + photos[mainIndex].displayUrl + '" alt="Foto -- antippen zum Vergrössern" onclick="openAdminPhotoViewer(window.admPhotoIndex)" loading="lazy" decoding="async">';
     if (editMode) {
       html += '<button type="button" class="adm-photo-thumb__remove" onclick="removeAdminPhoto(' + photos[mainIndex].id + ')" aria-label="Foto löschen" title="Foto löschen"><i data-lucide="x" width="12" height="12"></i></button>';
     }
@@ -384,7 +386,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (photos.length > 1) {
       html += '<div class="adm-photo-thumbs" id="admPhotoThumbs">';
       photos.forEach(function (p, i) {
-        html += '<img src="' + p.url + '" alt="Foto ' + (i + 1) + '" class="' + (i === mainIndex ? 'active' : '') + '" onclick="selectAdminPhoto(' + i + ')">';
+        html += '<img src="' + p.displayUrl + '" alt="Foto ' + (i + 1) + '" class="' + (i === mainIndex ? 'active' : '') + '" onclick="selectAdminPhoto(' + i + ')" loading="lazy" decoding="async">';
       });
       html += '</div>';
     }
