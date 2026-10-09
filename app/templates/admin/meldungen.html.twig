@@ -37,7 +37,7 @@
       <tbody>
         {% for r in items %}
         {% set comment_flat = r.comment|replace({"\r\n": ' ', "\n": ' ', "\r": ' '}) %}
-        <tr class="adm-table-row--link" onclick="location.href='{{ path('admin_meldung_detail', {id: report_id(r.id)}) }}'">
+        <tr class="adm-table-row--link" onclick="location.href='{{ path('admin_meldung_detail', {id: report_id(r.id)}) }}?status={{ current_status }}'">
           <td><span class="adm-rate-pill" data-r="{{ r.rating }}">{{ rating_labels[r.rating]|default(r.rating) }}</span></td>
           <td class="adm-td-comment">{{ comment_flat|length > 140 ? comment_flat|slice(0, 140) ~ '…' : comment_flat }}</td>
           <td class="adm-td-muted">

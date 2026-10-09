@@ -71,12 +71,22 @@ class MeldungenController extends AbstractController
     }
 
     #[Route('/meldungen/{id}', name: 'admin_meldung_detail', methods: ['GET'], requirements: ['id' => 'm-\d+'])]
-    public function detail(string $id): Response
+    public function detail(string $id, Request $request): Response
     {
         $numericId = ReportPresenter::parseId($id);
         $report = $numericId !== null ? $this->reports->find($numericId) : null;
         if ($report === null) {
             throw $this->createNotFoundException('No resource with that id.');
+        }
+
+        // Carries the list's active filter tab through so "Zurück zu Meldungen" lands back on
+        // the same tab instead of always resetting to "Neu" -- the list's row links append
+        // ?status=<current_status> for this. Validated against the same allowed set as list()
+        // rather than passed through blindly, since it ends up in a rendered href.
+        $allowedStatuses = [Report::STATUS_PENDING_REVIEW, Report::STATUS_PUBLISHED, Report::STATUS_PENDING_EMAIL_CONFIRMATION, Report::STATUS_DECLINED];
+        $backStatus = $request->query->get('status');
+        if (!in_array($backStatus, $allowedStatuses, true)) {
+            $backStatus = null;
         }
 
         $ratingLabels = [];
@@ -96,6 +106,7 @@ class MeldungenController extends AbstractController
             'pending_count' => $this->reports->countByStatus(Report::STATUS_PENDING_REVIEW),
             'report' => $report,
             'report_id' => ReportPresenter::formatId($report->getId()),
+            'back_status' => $backStatus,
             'rating_labels' => $ratingLabels,
             'rating_colors' => $ratingColors,
             'source_labels' => $sourceLabels,
