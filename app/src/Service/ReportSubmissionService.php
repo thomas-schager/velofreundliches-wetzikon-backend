@@ -136,32 +136,65 @@ class ReportSubmissionService
         $this->storePhotos($report, $photoBlobs);
         $this->em->flush();
 
-        $confirmUrl = $this->router->generate('api_reports_confirm', ['token' => $report->getConfirmationToken()], UrlGeneratorInterface::ABSOLUTE_URL);
         $this->logger->info('Report submitted, confirmation link generated', [
             'reportId' => $report->getId(),
             'email' => $email,
-            'confirmUrl' => $confirmUrl,
+            'confirmUrl' => $this->router->generate('api_reports_confirm', ['token' => $report->getConfirmationToken()], UrlGeneratorInterface::ABSOLUTE_URL),
         ]);
 
         try {
-            $this->mailer->send((new TemplatedEmail())
-                ->from(new Address('notifications@velofreundliches-wetzikon.ch', 'Velofreundliches Wetzikon'))
-                ->to($email)
-                ->subject('Bitte bestätige deine Meldung bei Velofreundliches Wetzikon')
-                ->htmlTemplate('emails/report_confirmation.html.twig')
-                ->textTemplate('emails/report_confirmation.txt.twig')
-                ->context([
-                    'confirmUrl' => $confirmUrl,
-                    'ttlHours' => self::CONFIRMATION_TTL_HOURS,
-                    'name' => $report->getName(),
-                    'addressPhrase' => $this->addressPhraseForEmail($address, $addressDistanceM),
-                    'ratingLabel' => $this->ratings->find((int) $rating)?->getLabel(),
-                ]));
+            $this->sendConfirmationEmail($report);
         } catch (TransportExceptionInterface $e) {
             $this->logger->warning('Could not send confirmation email', ['exception' => $e->getMessage()]);
         }
 
         return $report;
+    }
+
+    /**
+     * Admin-triggered resend -- the "Bestätigungs-E-Mail erneut senden" action available on a
+     * Meldung that's still awaiting email confirmation (see
+     * AdminReportsController::resendConfirmation()). Reuses the existing confirmation token
+     * rather than issuing a new one -- resending isn't a new identity check, just a fresh copy
+     * of the same link -- and resets confirmationExpiresAt to a full new 48h window from now.
+     * Unlike submit()'s best-effort send, a transport failure here is NOT swallowed: sending the
+     * email *is* the entire point of this action, so the admin needs to see that it failed
+     * rather than believe it went out.
+     */
+    public function resendConfirmationEmail(Report $report): void
+    {
+        if ($report->getStatus() !== Report::STATUS_PENDING_EMAIL_CONFIRMATION) {
+            throw new ValidationException('Request body failed validation.', ['status' => 'report is not awaiting email confirmation']);
+        }
+
+        $report->setConfirmationExpiresAt((new DateTimeImmutable())->add(new DateInterval('PT' . self::CONFIRMATION_TTL_HOURS . 'H')));
+        $report->touch();
+        $this->em->flush();
+
+        $this->sendConfirmationEmail($report, isReminder: true);
+    }
+
+    private function sendConfirmationEmail(Report $report, bool $isReminder = false): void
+    {
+        $confirmUrl = $this->router->generate('api_reports_confirm', ['token' => $report->getConfirmationToken()], UrlGeneratorInterface::ABSOLUTE_URL);
+
+        $subject = $isReminder
+            ? 'Erinnerung: Bitte bestätige deine Meldung bei Velofreundliches Wetzikon'
+            : 'Bitte bestätige deine Meldung bei Velofreundliches Wetzikon';
+
+        $this->mailer->send((new TemplatedEmail())
+            ->from(new Address('notifications@velofreundliches-wetzikon.ch', 'Velofreundliches Wetzikon'))
+            ->to($report->getEmail())
+            ->subject($subject)
+            ->htmlTemplate('emails/report_confirmation.html.twig')
+            ->textTemplate('emails/report_confirmation.txt.twig')
+            ->context([
+                'confirmUrl' => $confirmUrl,
+                'ttlHours' => self::CONFIRMATION_TTL_HOURS,
+                'name' => $report->getName(),
+                'addressPhrase' => $this->addressPhraseForEmail($report->getAddress(), $report->getAddressDistanceM()),
+                'ratingLabel' => $this->ratings->find($report->getRating())?->getLabel(),
+            ]));
     }
 
     /**

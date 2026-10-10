@@ -8,6 +8,7 @@ use App\Service\Exception\ValidationException;
 use App\Service\Exception\VersionConflictException;
 use App\Service\ReportModerationService;
 use App\Service\ReportPresenter;
+use App\Service\ReportSubmissionService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -22,8 +23,10 @@ use Symfony\Component\Security\Http\Attribute\CurrentUser;
  */
 class AdminReportsController extends AbstractApiController
 {
-    public function __construct(private readonly ReportModerationService $moderation)
-    {
+    public function __construct(
+        private readonly ReportModerationService $moderation,
+        private readonly ReportSubmissionService $submissionService,
+    ) {
     }
 
     #[Route('/admin/reports', name: 'admin_api_reports_list', methods: ['GET'])]
@@ -83,6 +86,34 @@ class AdminReportsController extends AbstractApiController
             $report = $this->moderation->update($report, $patch, (int) $ifMatch, $moderator);
         } catch (VersionConflictException $e) {
             return $this->errorResponse('version_conflict', $e->getMessage(), 409);
+        } catch (ValidationException $e) {
+            return $this->errorResponse('validation_error', $e->getMessage(), 400, $e->getErrors());
+        }
+
+        return new JsonResponse(ReportPresenter::toAdminArray($report));
+    }
+
+    /**
+     * "Bestätigungs-E-Mail erneut senden" -- only meaningful while a Meldung is still
+     * pending_email_confirmation (see ReportSubmissionService::resendConfirmationEmail()),
+     * which is also where that's enforced/returns 400 for any other status.
+     */
+    #[Route('/admin/reports/{id}/resend-confirmation', name: 'admin_api_reports_resend_confirmation', methods: ['POST'], requirements: ['id' => 'm-\d+'])]
+    public function resendConfirmation(string $id): JsonResponse
+    {
+        $numericId = ReportPresenter::parseId($id);
+        if ($numericId === null) {
+            return $this->errorResponse('not_found', 'No resource with that id.', 404);
+        }
+
+        try {
+            $report = $this->moderation->get($numericId);
+        } catch (ReportNotFoundException $e) {
+            return $this->errorResponse('not_found', $e->getMessage(), 404);
+        }
+
+        try {
+            $this->submissionService->resendConfirmationEmail($report);
         } catch (ValidationException $e) {
             return $this->errorResponse('validation_error', $e->getMessage(), 400, $e->getErrors());
         }

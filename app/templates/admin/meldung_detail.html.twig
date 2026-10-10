@@ -82,7 +82,14 @@
            field edit is in flight so a decision is never made on about-to-change data. -->
       <div class="adm-detail-actions" id="viewActions">
         <button class="adm-btn adm-btn--danger" id="btnDecline" {{ report.status == 'declined' ? 'disabled' : '' }} title="{{ report.status == 'declined' ? 'Bereits abgelehnt' : '' }}"><i data-lucide="x" width="15" height="15"></i> Ablehnen</button>
-        <button class="adm-btn adm-btn--primary" id="btnPublish" {{ report.status == 'published' ? 'disabled' : '' }} title="{{ report.status == 'published' ? 'Bereits veröffentlicht' : '' }}"><i data-lucide="check" width="15" height="15"></i> Veröffentlichen</button>
+        {% if report.status == 'pending_email_confirmation' %}
+          {# No "Veröffentlichen" here on purpose -- the submitter hasn't even confirmed their
+             email yet, so there's nothing to publish. The only other thing to do besides
+             declining is giving them a fresh link, see resendConfirmationEmail(). #}
+          <button class="adm-btn adm-btn--primary" id="btnResendConfirmation"><i data-lucide="mail" width="15" height="15"></i> Bestätigungs-E-Mail erneut senden</button>
+        {% else %}
+          <button class="adm-btn adm-btn--primary" id="btnPublish" {{ report.status == 'published' ? 'disabled' : '' }} title="{{ report.status == 'published' ? 'Bereits veröffentlicht' : '' }}"><i data-lucide="check" width="15" height="15"></i> Veröffentlichen</button>
+        {% endif %}
       </div>
       <div class="adm-detail-actions" id="editActions" hidden>
         <button type="button" class="adm-btn adm-btn--ghost" id="btnDiscardEdit"><i data-lucide="x" width="15" height="15"></i> Verwerfen</button>
@@ -335,11 +342,39 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
-  document.getElementById('btnPublish').addEventListener('click', function () {
-    submitPatch({ status: 'published' }, function () {
-      window.location.href = '{{ path('admin_meldungen') }}?status=published';
+  // btnPublish/btnResendConfirmation are mutually exclusive -- only one of the two is rendered
+  // (see viewActions above), so each is guarded here rather than assumed present.
+  var btnPublish = document.getElementById('btnPublish');
+  if (btnPublish) {
+    btnPublish.addEventListener('click', function () {
+      submitPatch({ status: 'published' }, function () {
+        window.location.href = '{{ path('admin_meldungen') }}?status=published';
+      });
     });
-  });
+  }
+  var btnResendConfirmation = document.getElementById('btnResendConfirmation');
+  if (btnResendConfirmation) {
+    btnResendConfirmation.addEventListener('click', function () {
+      btnResendConfirmation.disabled = true;
+      fetch(reportApiUrl + '/resend-confirmation', { method: 'POST' })
+        .then(function (res) {
+          return res.json().then(function (data) { return { ok: res.ok, status: res.status, data: data }; });
+        })
+        .then(function (result) {
+          btnResendConfirmation.disabled = false;
+          if (!result.ok) {
+            alert('Fehler: ' + (result.data.message || result.status));
+            return;
+          }
+          version = result.data.version;
+          alert('Bestätigungs-E-Mail wurde erneut gesendet. Der Link ist weitere 48 Stunden gültig.');
+        })
+        .catch(function () {
+          btnResendConfirmation.disabled = false;
+          alert('Verbindung zum Server fehlgeschlagen.');
+        });
+    });
+  }
   document.getElementById('btnDecline').addEventListener('click', function () {
     if (!confirm('Diese Meldung wirklich ablehnen? Sie erscheint danach in keiner öffentlichen Ansicht.')) return;
     submitPatch({ status: 'declined' }, function () {
