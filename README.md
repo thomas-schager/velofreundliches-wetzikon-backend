@@ -67,14 +67,14 @@ how consistency between the API and the admin UI is maintained on one shared dat
 ## Database
 
 `database/schema.sql` is a draft MariaDB schema derived directly from `api/openapi.yaml`'s
-schemas — eight tables (`admin_users`, `auth_challenges`, `reports`, `report_photos`,
-`route_types`, `route_features`, `ratings`, `route_backups`; table/column names are English even
-where the domain concept is German, e.g. "reports" for "Meldungen" — see `database/schema.sql`'s
-own header), with the two small reference registries (`ratings`, `route_types`) pre-seeded with
-the values already live on the public site. Real Doctrine entities now exist and are the actual
-source of truth (Doctrine Migrations owns schema changes going forward, see
-`docs/api-implementation-strategy.md` §7) — `schema.sql` is kept in sync by hand for anyone who
-wants to read/load the schema without running the app.
+schemas — nine tables (`admin_users`, `auth_challenges`, `reports`, `report_photos`,
+`route_types`, `route_features`, `ratings`, `route_backups`, `report_sources`; table/column
+names are English even where the domain concept is German, e.g. "reports" for "Meldungen" — see
+`database/schema.sql`'s own header), with the three small reference registries (`ratings`,
+`route_types`, `report_sources`) pre-seeded with the values already live on the public site.
+Real Doctrine entities now exist and are the actual source of truth (Doctrine Migrations owns
+schema changes going forward, see `docs/api-implementation-strategy.md` §3.5) — `schema.sql` is
+kept in sync by hand for anyone who wants to read/load the schema without running the app.
 
 ## Route editor
 
@@ -144,11 +144,13 @@ Deliberately simplified for this local-dev-only pass (documented here rather tha
 ## Deployment
 
 Beyond local dev, this app also runs on two more environments on Hostpoint, over SSH: **testing**
-and **production**. Every testing deploy starts by refreshing testing's database and uploads from
-a fresh copy of production's, so it's always validated against real data before anything gets
-promoted; promoting copies testing's exact, already-validated files into production, not a second
-build. Automatic pre-migration database backups, a destructive-migration guard, and maintenance
-mode around the risky window apply on both.
+and **production**. By default, every testing deploy starts by refreshing testing's database and
+uploads from a fresh copy of production's, so it's always validated against real data before
+anything gets promoted (`deploy.sh test --no-refresh` opts out of that one step, for pushing a
+code change without losing test-only data — see DEPLOY.md §4); promoting copies testing's exact,
+already-validated files into production, not a second build. Automatic pre-migration database
+backups, a destructive-migration guard, and maintenance mode around the risky window apply on
+both.
 
 See `DEPLOY.md` for the full picture — one-time setup, the `app/deploy/` scripts
 (`deploy.sh`, `promote.sh`, `refresh-test-from-prod.sh`), the safety mechanisms, and known

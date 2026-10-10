@@ -197,11 +197,21 @@ cd app
 
 Same thing `deploy.sh test` does as its first step, callable on its own if you just want
 testing's data reset without touching its code. Checks the two base paths aren't identical,
-that both environments' `.env.local` exist and name their expected database, then: `mysqldump`
-piped directly into testing's database (both databases live on the same MariaDB host per
+that both environments' `.env.local` exist and name their expected database, then: drops every
+table currently in testing's database (`information_schema.tables`-driven, not `DROP DATABASE`
+— a shared-hosting DB user commonly can't do that, only drop its own tables), `mysqldump` piped
+directly into testing's database (both databases live on the same MariaDB host per
 `internals.md`, so nothing passes through your machine), plus `rsync` of `public/uploads/` and
 `var/route-backups/` between the two `app/` directories. No confirmation prompt — this only
 ever writes to testing's side.
+
+The explicit drop-everything-first step exists because `mysqldump`'s own `DROP TABLE IF EXISTS`
+only covers tables present in the *source* (production) — a table a migration already created on
+testing (testing routinely runs migrations ahead of production) would otherwise survive this
+refresh untouched while `doctrine_migration_versions` gets overwritten with production's older
+history, and the next `migrate` then fails trying to `CREATE TABLE` something still physically
+there. Dropping everything first makes testing a true replica of production every time,
+regardless of prior drift — see `app/deploy/remote/refresh-db.sh`'s own header comment.
 
 ---
 
@@ -237,8 +247,8 @@ the normal release flow — it's not called by `deploy.sh`, `promote.sh`, or
 
 Doctrine migration classes are plain PHP with literal SQL in `up()`/`down()` — nothing about
 them inherently prevents data loss. Concretely, for this app: `reports`, `report_photos`,
-`route_features`, `route_backups`, and `admin_users` hold real data; `ratings`/`route_types` are
-small pre-seeded reference tables, lower stakes.
+`route_features`, `route_backups`, and `admin_users` hold real data; `ratings`/`route_types`/
+`report_sources` are small pre-seeded reference tables, lower stakes.
 
 Two layers of protection, both automatic, on every deploy/promote:
 1. **Backup first.** `mysqldump --single-transaction --no-tablespaces`, gzipped, into

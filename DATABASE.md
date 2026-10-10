@@ -3,7 +3,7 @@
 A working Symfony application now exists in `app/` (see `README.md`'s Status section) and runs
 against exactly this schema. This doc still covers getting a local MariaDB instance running and
 loading `database/schema.sql` into it from scratch; **Doctrine Migrations is now the actual
-schema-change mechanism** going forward (see `docs/api-implementation-strategy.md` §7).
+schema-change mechanism** going forward (see `docs/api-implementation-strategy.md` §3.5).
 
 `app/migrations/Version20260903000000.php` is the real baseline -- `CREATE TABLE` for all seven
 original tables plus the `ratings`/`route_types` seed data, copied verbatim from `schema.sql`
@@ -12,16 +12,15 @@ DEPLOY.md §8) can build the whole schema via `doctrine:migrations:migrate` alon
 the tables here were already created by hand-loading `schema.sql`, it's marked applied
 (`doctrine:migrations:version --add`) *without* being executed -- same reasoning as below.
 
-`app/migrations/Version20260903185437.php` is the first *real* schema change after that baseline
-(column type/constraint cleanup) -- it was originally marked applied without running here too,
-which is why the hand-loaded schema below matches its column defs, not that migration's. **That
-migration has since been fixed (a statement-ordering bug meant it would never actually have run
-successfully) but still hasn't been executed against dev** -- dev's live schema is still on the
-pre-that-migration column types until it's actually run for real here (it now runs cleanly against
-a fresh database, verified against a scratch copy of this schema; not yet re-verified against dev
-directly). `app/src/Entity/*.php` — not this file — is now the source of truth for the schema;
-re-derive `schema.sql` from the entities if it ever needs to be regenerated, rather than
-hand-editing both.
+Four more migrations have followed since: `Version20260903185437.php` (column type/constraint
+cleanup -- originally marked applied without running, like the baseline, but has since actually
+been executed for real against dev too), `Version20260904075016.php` (adds `route_backups`),
+`Version20261002000000.php` (adds `report_sources` and `reports.source`), and
+`Version20261008000000.php` (adds `report_photos.display_url`). All five show as executed on dev
+(`php bin/console doctrine:migrations:status`) — dev's live schema matches `schema.sql` below
+exactly, nothing pending. `app/src/Entity/*.php` — not this file — is now the source of truth for
+the schema; re-derive `schema.sql` from the entities (or from a real `SHOW CREATE TABLE`) if it
+ever needs to be regenerated, rather than hand-editing both.
 
 ## Why MariaDB
 
@@ -86,14 +85,14 @@ docker exec -i velowetzikon-backend-mariadb mariadb -uroot -pgeheim velowetzikon
   < database/schema.sql
 ```
 
-This creates all eight tables and seeds the two small reference registries (`ratings`,
-`route_types`) with the values already live on the public site today — see `schema.sql`'s own
-header comment for exactly where each table's shape came from. `reports`, `report_photos`,
-`route_features`, and `route_backups` start empty; there's no legacy data to import (today's
+This creates all nine tables and seeds the three small reference registries (`ratings`,
+`route_types`, `report_sources`) with the values already live on the public site today — see
+`schema.sql`'s own header comment for exactly where each table's shape came from. `reports`,
+`report_photos`, and `route_features` start empty; there's no legacy data to import (today's
 "database" is two static files, `velo-meldungen.json` and `velo-routes.geojson`, both in
-`VeloWetzikon_Contao`). (On an already-running app, `route_backups` was in fact added later via
-a real Doctrine migration, not by re-running this file — see `schema.sql`'s header. It's included
-here too so a from-scratch load produces the same end state.)
+`VeloWetzikon_Contao`). (On an already-running app, `route_backups` and `report_sources` were in
+fact added later via real Doctrine migrations, not by re-running this file — see `schema.sql`'s
+header. They're included here too so a from-scratch load produces the same end state.)
 
 Re-running the load against a non-empty database will fail on the first `CREATE TABLE` (tables
 already exist) — drop the database and recreate it first if you want a clean reload:
@@ -111,10 +110,10 @@ docker exec velowetzikon-backend-mariadb mariadb -uroot -pgeheim velowetzikon_ba
 docker exec velowetzikon-backend-mariadb mariadb -uroot -pgeheim velowetzikon_backend -e "SELECT * FROM ratings;"
 ```
 
-Expect 8 tables (`admin_users`, `auth_challenges`, `report_photos`, `reports`, `ratings`,
-`route_features`, `route_types`, `route_backups`) plus Doctrine's own `doctrine_migration_versions`
-tracking table (9 total once the Symfony app has run migrations against it), and 5 seeded rows in
-`ratings` (9 in `route_types`).
+Expect 9 tables (`admin_users`, `auth_challenges`, `report_photos`, `report_sources`, `reports`,
+`ratings`, `route_features`, `route_types`, `route_backups`) plus Doctrine's own
+`doctrine_migration_versions` tracking table (10 total once the Symfony app has run migrations
+against it), and 5 seeded rows in `ratings` (9 in `route_types`, 1 in `report_sources`).
 
 ## Where the connection settings come from
 
