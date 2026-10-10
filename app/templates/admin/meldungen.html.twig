@@ -55,7 +55,7 @@
             <div class="adm-td-muted">{{ r.email }}</div>
           </td>
           <td class="adm-td-muted">{{ source_labels[r.source]|default('—') }}</td>
-          <td class="adm-td-muted">{{ r.createdAt|relative_de }}</td>
+          <td class="adm-td-muted" title="{{ r.createdAt|date('d.m.Y, H:i:s') }}">{{ r.createdAt|relative_de }}</td>
         </tr>
         {% else %}
         <tr><td colspan="7" style="text-align:center;color:var(--color-muted);padding:32px;">Keine Meldungen in dieser Ansicht.</td></tr>
