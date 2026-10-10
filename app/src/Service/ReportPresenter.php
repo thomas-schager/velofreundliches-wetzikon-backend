@@ -25,6 +25,29 @@ class ReportPresenter
         return (int) $m[1];
     }
 
+    /**
+     * Same 20m/50m thresholds as the frontend's formatAddressLabel() (velomelder-gelbes-band.html)
+     * -- keep both in sync if the thresholds ever change. Returns a ready-to-embed prepositional
+     * phrase ("bei X" / "in der Nähe von X"), not a bare label, since callers need different
+     * connecting words depending on which case applies when dropping this into a sentence.
+     * Shared by ReportSubmissionService (confirmation emails) and ReportModerationService
+     * (publish notification) rather than duplicated in each.
+     */
+    public static function addressPhraseForEmail(?string $address, ?float $distanceM): ?string
+    {
+        if ($address === null || $distanceM === null) {
+            return null;
+        }
+        if ($distanceM <= 20) {
+            return 'bei ' . $address;
+        }
+        if ($distanceM <= 50) {
+            return 'in der Nähe von ' . $address;
+        }
+
+        return null;
+    }
+
     /** @return array<string, mixed> */
     public static function toPublicArray(Report $report): array
     {

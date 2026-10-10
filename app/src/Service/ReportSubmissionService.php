@@ -192,30 +192,9 @@ class ReportSubmissionService
                 'confirmUrl' => $confirmUrl,
                 'ttlHours' => self::CONFIRMATION_TTL_HOURS,
                 'name' => $report->getName(),
-                'addressPhrase' => $this->addressPhraseForEmail($report->getAddress(), $report->getAddressDistanceM()),
+                'addressPhrase' => ReportPresenter::addressPhraseForEmail($report->getAddress(), $report->getAddressDistanceM()),
                 'ratingLabel' => $this->ratings->find($report->getRating())?->getLabel(),
             ]));
-    }
-
-    /**
-     * Same 20m/50m thresholds as the frontend's formatAddressLabel() (velomelder-gelbes-band.html)
-     * -- keep both in sync if the thresholds ever change. Returns a ready-to-embed prepositional
-     * phrase ("bei X" / "in der Nähe von X"), not a bare label, since the two cases need different
-     * connecting words when dropped into "...Meldung {phrase}..." in the e-mail template.
-     */
-    private function addressPhraseForEmail(?string $address, ?float $distanceM): ?string
-    {
-        if ($address === null || $distanceM === null) {
-            return null;
-        }
-        if ($distanceM <= 20) {
-            return 'bei ' . $address;
-        }
-        if ($distanceM <= 50) {
-            return 'in der Nähe von ' . $address;
-        }
-
-        return null;
     }
 
     /**

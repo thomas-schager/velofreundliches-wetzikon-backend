@@ -1,0 +1,26 @@
+{%- set meldungUrl = absolute_url('/velomelder-gelbes-band.html?meldung=' ~ meldungId) -%}
+{%- set ratingSuffix = ratingLabel ? ' (Bewertung: ' ~ ratingLabel ~ ')' : '' -%}
+{%- set newsSentence = addressPhrase
+    ? 'deine Meldung ' ~ addressPhrase ~ ratingSuffix ~ ' wurde soeben von unserem Team geprüft und veröffentlicht -- sie ist jetzt für alle auf der Karte sichtbar.'
+    : 'deine Meldung' ~ ratingSuffix ~ ' wurde soeben von unserem Team geprüft und veröffentlicht -- sie ist jetzt für alle auf der Karte sichtbar.'
+-%}
+Hallo{% if name %} {{ name }}{% endif %},
+
+gute Nachrichten: {{ newsSentence }}
+
+Meldung ansehen:
+{{ meldungUrl }}
+
+Danke, dass du Wetzikon velofreundlicher machst.
+
+
+Dein Team von
+Velofreundliches Wetzikon
+
+
+
+--
+Velofreundliches Wetzikon
+Private Initiative
+Thom Hoffmann, Messikommerstrasse 37, 8620 Wetzikon
+Impressum: https://velofreundliches-wetzikon.ch/impressum-editor/

@@ -124,11 +124,13 @@ Deliberately simplified for this local-dev-only pass (documented here rather tha
   value is treated as valid, per the task's explicit scope. Real hCaptcha/Turnstile verification
   is future work (see `docs/api-implementation-strategy.md` §5).
 - **Emails are real**, via a real SMTP account (Hostpoint, `MAILER_DSN` in `app/.env.local`, not
-  committed). The login 2FA code and the VeloMelder submission confirmation link are branded HTML
-  (+ plain-text fallback) templates — see `app/templates/emails/login_code.*.twig` and
-  `report_confirmation.*.twig`. The password-reset 2FA code and the password-changed notice are
-  still plain text for now — see `app/src/Service/AuthService.php`. As a local-dev convenience
-  only, the 2FA code is also logged via Monolog (`app/var/log/dev.log`) and, in the `dev`
+  committed). The login 2FA code, the VeloMelder submission confirmation link (including its
+  resend, see "Bestätigungs-E-Mail erneut senden" in `app/templates/admin/meldung_detail.html.twig`
+  for a Meldung still awaiting confirmation), and the "your Meldung was published" notification
+  are branded HTML (+ plain-text fallback) templates — see `app/templates/emails/login_code.*.twig`,
+  `report_confirmation.*.twig`, and `report_published.*.twig`. The password-reset 2FA code and the
+  password-changed notice are still plain text for now — see `app/src/Service/AuthService.php`. As
+  a local-dev convenience only, the 2FA code is also logged via Monolog (`app/var/log/dev.log`) and, in the `dev`
   environment only, shown directly on the verify page as a "Dev-Modus" fallback in case a mail
   doesn't arrive.
 - **Automated-test email bypass**: a request to `/auth/login` or `/auth/forgot-password` carrying

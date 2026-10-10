@@ -4,12 +4,18 @@ namespace App\Service;
 
 use App\Entity\AdminUser;
 use App\Entity\Report;
+use App\Repository\RatingRepository;
 use App\Repository\ReportRepository;
 use App\Service\Exception\ReportNotFoundException;
 use App\Service\Exception\ValidationException;
 use App\Service\Exception\VersionConflictException;
 use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
+use Symfony\Bridge\Twig\Mime\TemplatedEmail;
+use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
+use Symfony\Component\Mailer\MailerInterface;
+use Symfony\Component\Mime\Address;
 
 /**
  * Admin moderation of reports: list/get/update/publish/decline/delete. Called from both the
@@ -23,7 +29,10 @@ class ReportModerationService
 
     public function __construct(
         private readonly ReportRepository $reports,
+        private readonly RatingRepository $ratings,
         private readonly EntityManagerInterface $em,
+        private readonly MailerInterface $mailer,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
@@ -60,6 +69,13 @@ class ReportModerationService
         if ($report->getVersion() !== $expectedVersion) {
             throw new VersionConflictException('Another admin changed this report first. Re-fetch and retry.');
         }
+
+        // Captured before the transaction so the notification below fires only on a genuine
+        // transition into "published" -- not on a redundant PATCH that merely repeats a status
+        // the report already has (the admin UI itself prevents that via btnPublish's disabled
+        // state, but the API has no such guard, and an email every time would be wrong either
+        // way).
+        $wasPublished = $report->getStatus() === Report::STATUS_PUBLISHED;
 
         $this->em->wrapInTransaction(function () use ($report, $patch, $moderator) {
             if (array_key_exists('lat', $patch)) {
@@ -121,7 +137,36 @@ class ReportModerationService
             $this->em->flush();
         });
 
+        // Outside the transaction on purpose -- a notification failure must not roll back a
+        // publish that already succeeded. Best-effort, same reasoning as
+        // ReportSubmissionService::submit()'s confirmation email: the admin's action (publish)
+        // already succeeded in the database: a mail hiccup is logged, not surfaced as a PATCH
+        // failure the admin would have to retry.
+        if (!$wasPublished && $report->getStatus() === Report::STATUS_PUBLISHED) {
+            try {
+                $this->sendPublishedNotification($report);
+            } catch (TransportExceptionInterface $e) {
+                $this->logger->warning('Could not send report-published notification email', ['exception' => $e->getMessage()]);
+            }
+        }
+
         return $report;
+    }
+
+    private function sendPublishedNotification(Report $report): void
+    {
+        $this->mailer->send((new TemplatedEmail())
+            ->from(new Address('notifications@velofreundliches-wetzikon.ch', 'Velofreundliches Wetzikon'))
+            ->to($report->getEmail())
+            ->subject('Deine Meldung wurde veröffentlicht')
+            ->htmlTemplate('emails/report_published.html.twig')
+            ->textTemplate('emails/report_published.txt.twig')
+            ->context([
+                'meldungId' => ReportPresenter::formatId($report->getId()),
+                'name' => $report->getName(),
+                'addressPhrase' => ReportPresenter::addressPhraseForEmail($report->getAddress(), $report->getAddressDistanceM()),
+                'ratingLabel' => $this->ratings->find($report->getRating())?->getLabel(),
+            ]));
     }
 
     public function delete(Report $report): void

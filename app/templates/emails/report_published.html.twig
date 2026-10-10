@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+{#
+  VeloMelder "your report was published" e-mail. Sent from
+  ReportModerationService::update() the moment a report's status actually transitions to
+  published (not on every redundant PATCH that merely repeats it) via a TemplatedEmail
+  (htmlTemplate + textTemplate, see report_published.txt.twig). Same bulletproof-table structure
+  as report_confirmation.html.twig -- see that file's own docblock for where the pattern comes
+  from; keep both in sync if the shared structure changes.
+
+  meldungUrl built here via absolute_url(), not UrlGeneratorInterface in PHP, because the public
+  page it points at (velomelder-gelbes-band.html) is a static file, not a Symfony route -- same
+  reasoning as the asset() logo URL below, just with an arbitrary path instead of asset(). This
+  runs inside the admin's PATCH /admin/reports/{id} request; that's a different request than the
+  one that produced report_confirmation.html.twig's confirmUrl, but it's still correct to build
+  from here because the admin backend and the public VeloMelder tool are always served from the
+  exact same host:port in every environment (dev/test/production) -- there's no separate
+  "public site" domain to get wrong.
+#}
+<html lang="de" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Velofreundliches Wetzikon</title>
+<!--[if mso]>
+<noscript>
+<xml>
+<o:OfficeDocumentSettings>
+<o:PixelsPerInch>96</o:PixelsPerInch>
+</o:OfficeDocumentSettings>
+</xml>
+</noscript>
+<style>
+  table { border-collapse: collapse; }
+  td, a, body { font-family: Roboto, Helvetica, Arial, sans-serif !important; }
+</style>
+<![endif]-->
+<style>
+  body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+  table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+  img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
+  body { margin: 0; padding: 0; width: 100% !important; background: #fafaf8; }
+  a { color: #dc3406; }
+  @media screen and (max-width: 600px) {
+    .email-container { width: 100% !important; }
+    .email-padded { padding-left: 20px !important; padding-right: 20px !important; }
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background:#fafaf8;">
+
+{%- set utmCampaign = 'meldung_veroeffentlicht' -%}
+{%- set siteUtmBase = 'utm_source=velomelder&utm_medium=email&utm_campaign=' ~ utmCampaign -%}
+{%- set meldungUrl = absolute_url('/velomelder-gelbes-band.html?meldung=' ~ meldungId) -%}
+
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#fafaf8;">
+  {{- addressPhrase ? 'Deine Meldung ' ~ addressPhrase ~ ' ist jetzt auf der Karte sichtbar.' : 'Deine Meldung ist jetzt auf der Karte sichtbar.' -}}
+</div>
+
+<center style="width:100%;background:#fafaf8;">
+<!--[if mso]>
+<table role="presentation" width="600" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td>
+<![endif]-->
+<table role="presentation" class="email-container" align="center" width="600" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;max-width:600px;width:100%;">
+
+  <tr>
+    <td class="email-padded" style="padding:32px 41px 24px;" align="left">
+      <a href="https://velofreundliches-wetzikon.ch/?{{ siteUtmBase }}&amp;utm_content=logo" target="_blank">
+        <img src="{{ absolute_url(asset('assets/email/logo.png')) }}" width="168" height="29" alt="Velofreundliches Wetzikon" style="display:block;border:0;outline:none;text-decoration:none;max-width:168px;" />
+      </a>
+    </td>
+  </tr>
+
+  <tr>
+    <td style="background:#ffffff;border:1px solid #e8e6e0;border-radius:8px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td class="email-padded" style="padding:40px 40px 32px;">
+
+            {# name/addressPhrase/ratingLabel: see ReportModerationService::update() -- all three
+               are null-safe (anonymous report, un-geocodable location, or a missing rating row
+               that can't actually happen given the 1-5 validation, but the template doesn't
+               assume it). addressPhrase is a ready-to-embed phrase ("bei X"/"in der Nähe von
+               X"), not a bare address -- see ReportPresenter::addressPhraseForEmail(). #}
+            {%- set ratingSuffix = ratingLabel ? ' (Bewertung: ' ~ ratingLabel ~ ')' : '' -%}
+            {%- set newsSentence = addressPhrase
+                ? 'deine Meldung ' ~ addressPhrase ~ ratingSuffix ~ ' wurde soeben von unserem Team geprüft und veröffentlicht – sie ist jetzt für alle auf der Karte sichtbar.'
+                : 'deine Meldung' ~ ratingSuffix ~ ' wurde soeben von unserem Team geprüft und veröffentlicht – sie ist jetzt für alle auf der Karte sichtbar.'
+            -%}
+            <p style="margin:0 0 24px;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#000000;">
+              Hallo{% if name %} {{ name }}{% endif %},<br><br>
+              gute Nachrichten: {{ newsSentence }}
+            </p>
+
+            <!-- Primary button -- bulletproof VML+HTML pattern, see email.html#buttons for the
+                 arcsize math (4px radius at 44px height -> 18%). -->
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
+              <tr>
+                <td>
+                  <!--[if mso]>
+                  <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{ meldungUrl }}" style="height:44px;v-text-anchor:middle;width:220px;" arcsize="18%" stroke="f" fillcolor="#dc3406">
+                  <w:anchorlock/>
+                  <center style="color:#ffffff;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:500;letter-spacing:0.01em;">Meldung ansehen</center>
+                  </v:roundrect>
+                  <![endif]-->
+                  <!--[if !mso]><!-->
+                  <a href="{{ meldungUrl }}" target="_blank" style="background-color:#dc3406;border-radius:4px;color:#ffffff;display:inline-block;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:500;letter-spacing:0.01em;line-height:44px;text-align:center;text-decoration:none;width:220px;-webkit-text-size-adjust:none;mso-hide:all;">Meldung ansehen</a>
+                  <!--<![endif]-->
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0 0 16px;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#000000;">
+              Danke, dass du Wetzikon velofreundlicher machst.
+            </p>
+
+            <p style="margin:0;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#000000;">
+              Dein Team von<br>Velofreundliches Wetzikon
+            </p>
+
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <tr>
+    <td class="email-padded" style="padding:24px 32px 40px;text-align:center;font-family:Roboto,Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#8a8a86;">
+      Velofreundliches Wetzikon &mdash; private Initiative<br>
+      Thom Hoffmann &middot; Messikommerstrasse 37 &middot; 8620 Wetzikon<br>
+      <a href="https://velofreundliches-wetzikon.ch/impressum-editor/?{{ siteUtmBase }}&amp;utm_content=impressum" style="color:#8a8a86;text-decoration:underline;">Impressum</a>
+    </td>
+  </tr>
+
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</center>
+</body>
+</html>
