@@ -90,12 +90,44 @@ class PublicReportsController extends AbstractApiController
         ], 202);
     }
 
+    /**
+     * This link is opened directly in a browser from the confirmation email, by a member of the
+     * public -- not an API consumer -- so it renders a branded HTML landing page (styled like
+     * the VeloMelder tool itself) instead of the raw JSON/plain-text this used to return.
+     *
+     * Deliberately side-effect-free (read-only check only, see
+     * ReportSubmissionService::checkConfirmationToken()) -- the real confirmation happens via
+     * confirmSubmit() below, a POST the rendered page fires itself (JS on load, or the
+     * <noscript> fallback button), so that a GET by an email "safe link" scanner can no longer
+     * confirm the report in the human's place.
+     */
     #[Route('/reports/confirm/{token}', name: 'api_reports_confirm', methods: ['GET'])]
     public function confirm(string $token): Response
     {
-        // This link is opened directly in a browser from the confirmation email, by a member of
-        // the public -- not an API consumer -- so it renders a branded HTML landing page (styled
-        // like the VeloMelder tool itself) instead of the raw JSON/plain-text this used to return.
+        $status = 'pending';
+        $httpStatus = 200;
+        try {
+            $this->submissionService->checkConfirmationToken($token);
+        } catch (ReportNotFoundException $e) {
+            $status = 'not_found';
+            $httpStatus = 404;
+        } catch (ExpiredChallengeException $e) {
+            $status = 'expired';
+            $httpStatus = 410;
+        }
+
+        return $this->render('reports/confirm.html.twig', [
+            'status' => $status,
+            'token' => $token,
+            'backUrl' => $this->velomelderBackUrl,
+            'backLabel' => $this->velomelderBackLabel,
+        ], new Response('', $httpStatus));
+    }
+
+    /** The actual confirmation -- see confirm()'s docblock for why it's a separate POST. */
+    #[Route('/reports/confirm/{token}', name: 'api_reports_confirm_submit', methods: ['POST'])]
+    public function confirmSubmit(string $token): Response
+    {
         $status = 'confirmed';
         $httpStatus = 200;
         try {
@@ -110,6 +142,7 @@ class PublicReportsController extends AbstractApiController
 
         return $this->render('reports/confirm.html.twig', [
             'status' => $status,
+            'token' => $token,
             'backUrl' => $this->velomelderBackUrl,
             'backLabel' => $this->velomelderBackLabel,
         ], new Response('', $httpStatus));

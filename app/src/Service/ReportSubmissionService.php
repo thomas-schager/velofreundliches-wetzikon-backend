@@ -185,22 +185,57 @@ class ReportSubmissionService
         return null;
     }
 
-    public function confirmEmail(string $token): Report
+    /**
+     * Shared lookup for both checkConfirmationToken() and confirmEmail() -- finds the report by
+     * token and enforces the 48h expiry, without mutating anything itself.
+     */
+    private function resolveConfirmationToken(string $token): Report
     {
         $report = $this->reports->findOneByConfirmationToken($token);
         if ($report === null) {
-            throw new ReportNotFoundException('Unknown or already-used token.');
+            throw new ReportNotFoundException('Unknown token.');
         }
         if ($report->getConfirmationExpiresAt() !== null && $report->getConfirmationExpiresAt() < new DateTimeImmutable()) {
             throw new ExpiredChallengeException('Token expired.');
         }
 
-        $report->setStatus(Report::STATUS_PENDING_REVIEW)
-            ->setEmailConfirmed(true)
-            ->setConfirmationToken(null);
-        $report->touch();
+        return $report;
+    }
 
-        $this->em->flush();
+    /**
+     * Read-only -- throws exactly like confirmEmail() would, but never confirms anything.
+     * PublicReportsController::confirm() (GET, the link actually embedded in the email) uses
+     * this to decide what to render, specifically so that GET has no side effect: email
+     * "safe link" scanners (Microsoft Defender/Proofpoint/Mimecast etc.) prefetch every link in
+     * an incoming mail with a plain GET before the human ever opens it, and a GET that itself
+     * confirmed the report would let a scanner do that instead of the real recipient. The real
+     * confirmation only happens via that same page's own POST (auto-submitted by JS on load, or
+     * by hand via its <noscript> fallback button) -- scanners don't execute JS or submit forms.
+     */
+    public function checkConfirmationToken(string $token): void
+    {
+        $this->resolveConfirmationToken($token);
+    }
+
+    /**
+     * Deliberately idempotent -- clicking the link again (a second device, or just clicking
+     * twice) must not show "link ungültig", so the token is never cleared on first use. It
+     * stays valid, and re-confirming is a no-op, until confirmationExpiresAt (still the real
+     * 48h cutoff -- that part is unchanged). Only the *first* confirmation actually moves the
+     * status to pending_review: a later call must not reset a report an admin has since
+     * published/declined back to pending_review.
+     */
+    public function confirmEmail(string $token): Report
+    {
+        $report = $this->resolveConfirmationToken($token);
+
+        if (!$report->isEmailConfirmed()) {
+            $report->setStatus(Report::STATUS_PENDING_REVIEW)
+                ->setEmailConfirmed(true);
+            $report->touch();
+
+            $this->em->flush();
+        }
 
         return $report;
     }
