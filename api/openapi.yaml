@@ -125,11 +125,13 @@ paths:
   /reports/confirm/{token}:
     get:
       tags: [Public — Reports]
-      summary: Confirm a submission via the emailed link
+      summary: Check a confirmation link and render the landing page
       description: >
-        Moves the entry from `pending_email_confirmation` to `pending_review` (into the admin
-        moderation queue). Does **not** publish it — an admin still has to approve it, see
-        `Admin — Reports`. Invalidates the token after use.
+        Opened directly in a browser from the confirmation email. Deliberately side-effect-free
+        — only checks the token (unknown/expired), it does not confirm anything itself. Renders
+        an HTML landing page whose own POST (below) performs the actual confirmation, either
+        auto-submitted by JS on load or via a `<noscript>` fallback button, so that an email
+        "safe link" scanner prefetching this GET can't confirm the report in the human's place.
       parameters:
         - name: token
           in: path
@@ -137,11 +139,66 @@ paths:
           schema: { type: string }
       responses:
         '200':
-          description: Confirmed — now awaiting moderation.
+          description: Token valid — renders the landing page, which will POST to confirm it.
         '404':
-          description: Unknown or already-used token.
+          description: Unknown token.
         '410':
           description: Token expired.
+    post:
+      tags: [Public — Reports]
+      summary: Confirm a submission via the emailed link
+      description: >
+        The actual confirmation, performed by the landing page above rather than by the emailed
+        link itself. Moves the entry from `pending_email_confirmation` to `pending_review` (into
+        the admin moderation queue). Does **not** publish it — an admin still has to approve it,
+        see `Admin — Reports`. Idempotent: the token stays valid (not invalidated) and a repeat
+        call for an already-confirmed report is a no-op, until the token naturally expires —
+        clicking the link twice, or from two devices, must not show a failure.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Confirmed (or already was) — now awaiting moderation.
+        '404':
+          description: Unknown token.
+        '410':
+          description: Token expired.
+
+  /reports/{id}/newsletter-signup/{sig}:
+    post:
+      tags: [Public — Reports]
+      summary: Ask to be added to the real newsletter
+      description: >
+        Called by the confirm-landing-page CTA, shown only once email confirmation (see
+        `/reports/confirm/{token}`) has succeeded, and never for an address already listed in
+        `config/newsletter_subscribers.txt`. Not a real subscription by itself — it only sends an
+        internal notification so a human adds the address to the real newsletter list by hand;
+        idempotent, so a repeat call for the same report sends nothing twice. `sig` is an HMAC of
+        `id` (see `ReportSubmissionService::newsletterSignupSignature()`), not an authentication
+        token — it only gates triggering this one notification, not access to any data.
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+        - name: sig
+          in: path
+          required: true
+          description: HMAC signature of `id`, as rendered into the confirm landing page.
+          schema: { type: string, example: "8da9751d76381d5fdd4465d2612b12ad" }
+      responses:
+        '200':
+          description: >
+            Accepted. Returned even when nothing new happens — already requested, or the address
+            is on the subscriber-suppression list — both are intentional no-ops.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, enum: [true] }
+        '404':
+          description: Unknown report id, or `sig` doesn't match it.
 
   # ---------------------------------------------------------------- PUBLIC: ROUTES
   /routes:
@@ -432,6 +489,28 @@ paths:
         - $ref: '#/components/parameters/ReportId'
       responses:
         '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/reports/{id}/resend-confirmation:
+    post:
+      tags: [Admin — Reports]
+      summary: Resend the confirmation e-mail for a Meldung still awaiting it
+      description: >
+        Only valid while the report is `pending_email_confirmation` — the admin UI's
+        "Bestätigungs-E-Mail erneut senden" action, shown instead of "Veröffentlichen" for that
+        status (there's nothing to publish yet). Reuses the existing confirmation token and
+        resets its expiry to a fresh 48h window; does not change the report's status.
+      security: [{ sessionAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: Resent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminReport' }
+        '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 

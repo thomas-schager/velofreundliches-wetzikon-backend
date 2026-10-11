@@ -142,6 +142,12 @@ Deliberately simplified for this local-dev-only pass (documented here rather tha
 - Reverse-geocoded `address`/`addressDistanceM` on submitted reports are always `null` — no
   geocoding service is wired up; these fields exist in the schema/API for when one is.
 - `POST /auth/logout` skips CSRF-token validation (no CSRF wiring set up for this JSON-only flow).
+- **Newsletter signup isn't a real integration.** The confirm-landing-page CTA (once a reporter's
+  email is confirmed) doesn't subscribe anyone to anything itself — it just emails a fixed
+  address (`ReportSubmissionService::NEWSLETTER_NOTIFY_EMAIL`, hardcoded, not env-configurable —
+  deliberately temporary, see that constant's comment) so a human adds the address to the real
+  newsletter by hand. People already on it are listed one-per-line in
+  `app/config/newsletter_subscribers.txt` (hand-maintained, committed) and never see the CTA.
 
 ## Deployment
 

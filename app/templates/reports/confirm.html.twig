@@ -27,8 +27,8 @@
   --vw-muted-strong:   #5e5e5a;
   --vw-font-display:   'Jost', system-ui, sans-serif;
   --vw-font-body:      'Roboto', system-ui, sans-serif;
+  --vw-radius-sm:      4px;
   --vw-radius-md:      8px;
-  --vw-radius-full:    999px;
   --vw-shadow-md:      0 1px 2px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.04);
   --text-xs:   12px;
   --text-sm:   14px;
@@ -53,14 +53,26 @@ body { display: flex; flex-direction: column; align-items: center; min-height: 1
 .card h1 { font-family: var(--vw-font-display); font-size: var(--text-xl); font-weight: 600; margin: 0 0 12px; letter-spacing: -0.01em; }
 .card p { font-size: var(--text-sm); color: var(--vw-muted-strong); line-height: 1.55; margin: 0 0 24px; }
 
-.btn-back {
+.btn-back, .btn-primary {
   display: inline-flex; align-items: center; justify-content: center; padding: 12px 24px;
-  border-radius: var(--vw-radius-full); background: var(--vw-primary); color: #fff; font-family: var(--vw-font-body);
+  border-radius: var(--vw-radius-sm); background: var(--vw-primary); color: #fff; font-family: var(--vw-font-body);
   font-size: var(--text-sm); font-weight: 500; text-decoration: none; border: none; cursor: pointer;
   transition: background 150ms;
 }
-.btn-back:hover { background: #e84a3a; }
+.btn-back:hover, .btn-primary:hover { background: #e84a3a; }
+.btn-primary:disabled { cursor: default; opacity: 0.6; }
 .confirm-form { margin: 0 0 16px; }
+
+.newsletter { border-top: 1px solid var(--vw-border); margin: 24px 0; padding-top: 24px; }
+.newsletter p { margin: 0 0 16px; }
+.btn-secondary {
+  display: inline-flex; align-items: center; justify-content: center; padding: 11px 24px;
+  border-radius: var(--vw-radius-sm); background: transparent; color: var(--vw-dark);
+  border: 1px solid var(--vw-border); font-family: var(--vw-font-body); font-size: var(--text-sm);
+  font-weight: 500; text-decoration: none; cursor: pointer; transition: border-color 150ms, color 150ms;
+}
+.btn-secondary:hover { border-color: var(--vw-primary); color: var(--vw-primary); }
+.newsletter__thanks { color: var(--vw-success-dark); font-size: var(--text-sm); font-weight: 500; margin: 0; }
 </style>
 </head>
 <body>
@@ -85,6 +97,12 @@ body { display: flex; flex-direction: column; align-items: center; min-height: 1
     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--vw-success-dark)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l2.5 2.5L16 9"/></svg>
     <h1>Bestätigt — danke!</h1>
     <p>Deine Meldung wird nun von unserem Team geprüft. Sobald sie freigegeben ist, erscheint sie auf der Karte.</p>
+    {% if newsletterReportId %}
+    <div class="newsletter" id="newsletterBlock" data-report-id="{{ newsletterReportId }}" data-sig="{{ newsletterSig }}">
+      <p>Möchtest du regelmässige Updates erhalten – vielleicht auch mit deiner Meldung? Abonniere unseren Newsletter.</p>
+      <button type="button" class="btn-primary" id="btnNewsletter">Newsletter abonnieren</button>
+    </div>
+    {% endif %}
   {% elseif status == 'expired' %}
     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#c9a227" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
     <h1>Link abgelaufen</h1>
@@ -94,12 +112,36 @@ body { display: flex; flex-direction: column; align-items: center; min-height: 1
     <h1>Link ungültig</h1>
     <p>Dieser Bestätigungslink ist unbekannt. Prüfe, ob du den richtigen Link aus der E-Mail geöffnet hast.</p>
   {% endif %}
-  <a class="btn-back" href="{{ backUrl }}">{{ backLabel }}</a>
+  <a class="{{ (status == 'confirmed' and newsletterReportId) ? 'btn-secondary' : 'btn-back' }}" href="{{ backUrl }}">{{ backLabel }}</a>
 </div>
 
 {% if status == 'pending' %}
 <script>
 document.getElementById('confirmForm').submit();
+</script>
+{% endif %}
+
+{% if status == 'confirmed' %}
+<script>
+(function () {
+  var block = document.getElementById('newsletterBlock');
+  var btn = document.getElementById('btnNewsletter');
+  if (!block || !btn) return;
+  btn.addEventListener('click', function () {
+    btn.disabled = true;
+    btn.textContent = 'Einen Moment …';
+    fetch('/reports/' + encodeURIComponent(block.dataset.reportId) + '/newsletter-signup/' + encodeURIComponent(block.dataset.sig), {
+      method: 'POST',
+    }).then(function (res) {
+      if (!res.ok) throw new Error('request failed');
+      block.innerHTML = '<p class="newsletter__thanks">Danke! Wir melden uns, sobald es Neuigkeiten gibt.</p>';
+    }).catch(function () {
+      btn.disabled = false;
+      btn.textContent = 'Newsletter abonnieren';
+      alert('Das hat leider nicht geklappt. Bitte versuch es später erneut.');
+    });
+  });
+})();
 </script>
 {% endif %}
 

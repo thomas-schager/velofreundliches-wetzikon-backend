@@ -71,6 +71,16 @@ class Report
     #[ORM\Column(name: 'confirmation_expires_at', type: 'datetime_immutable', nullable: true)]
     private ?DateTimeImmutable $confirmationExpiresAt = null;
 
+    /* Set the first time the reporter asks, on the email-confirmation landing page, to be added
+     * to the newsletter (see ReportSubmissionService::requestNewsletterSignup()) -- always after
+     * that same email has already been confirmed via double opt-in, since that's the only state
+     * the landing page offers this in. Not a real subscription by itself -- it just flags this
+     * report's email for someone to add to the newsletter list by hand; also doubles as the
+     * idempotency guard against sending the internal notification email twice for the same
+     * report. */
+    #[ORM\Column(name: 'newsletter_requested_at', type: 'datetime_immutable', nullable: true)]
+    private ?DateTimeImmutable $newsletterRequestedAt = null;
+
     #[ORM\Column(name: 'internal_note', type: 'text', nullable: true)]
     private ?string $internalNote = null;
 
@@ -308,6 +318,18 @@ class Report
     public function setModeratedAt(?DateTimeImmutable $moderatedAt): static
     {
         $this->moderatedAt = $moderatedAt;
+
+        return $this;
+    }
+
+    public function getNewsletterRequestedAt(): ?DateTimeImmutable
+    {
+        return $this->newsletterRequestedAt;
+    }
+
+    public function setNewsletterRequestedAt(?DateTimeImmutable $newsletterRequestedAt): static
+    {
+        $this->newsletterRequestedAt = $newsletterRequestedAt;
 
         return $this;
     }

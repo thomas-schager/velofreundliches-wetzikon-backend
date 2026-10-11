@@ -130,8 +130,14 @@ class PublicReportsController extends AbstractApiController
     {
         $status = 'confirmed';
         $httpStatus = 200;
+        $newsletterReportId = null;
+        $newsletterSig = null;
         try {
-            $this->submissionService->confirmEmail($token);
+            $report = $this->submissionService->confirmEmail($token);
+            if (!$this->submissionService->isAlreadySubscribedToNewsletter($report->getEmail())) {
+                $newsletterReportId = ReportPresenter::formatId($report->getId());
+                $newsletterSig = $this->submissionService->newsletterSignupSignature($report->getId());
+            }
         } catch (ReportNotFoundException $e) {
             $status = 'not_found';
             $httpStatus = 404;
@@ -145,6 +151,33 @@ class PublicReportsController extends AbstractApiController
             'token' => $token,
             'backUrl' => $this->velomelderBackUrl,
             'backLabel' => $this->velomelderBackLabel,
+            'newsletterReportId' => $newsletterReportId,
+            'newsletterSig' => $newsletterSig,
         ], new Response('', $httpStatus));
+    }
+
+    /**
+     * Called by a tiny fetch() when the reporter asks, on the confirm landing page, to be added
+     * to the newsletter --
+     * see requestNewsletterSignup()'s docblock for why this only sends an internal
+     * notification rather than a real subscription. {sig} gates it (not auth, see
+     * ReportSubmissionService::newsletterSignupSignature()) so an arbitrary report id can't be
+     * used to trigger the notification email for a report that isn't yours.
+     */
+    #[Route('/reports/{id}/newsletter-signup/{sig}', name: 'api_reports_newsletter_signup', methods: ['POST'], requirements: ['id' => 'm-\d+', 'sig' => '[a-f0-9]{32}'])]
+    public function newsletterSignup(string $id, string $sig): JsonResponse
+    {
+        $numericId = ReportPresenter::parseId($id);
+        if ($numericId === null) {
+            return $this->errorResponse('not_found', 'No resource with that id.', 404);
+        }
+
+        try {
+            $this->submissionService->requestNewsletterSignup($numericId, $sig);
+        } catch (ReportNotFoundException $e) {
+            return $this->errorResponse('not_found', 'No resource with that id.', 404);
+        }
+
+        return new JsonResponse(['ok' => true]);
     }
 }

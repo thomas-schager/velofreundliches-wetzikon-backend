@@ -24,7 +24,9 @@
 --                       design-prototype/verify.html being one shared page for both flows
 --   reports         -- VeloMelder reports/"Meldungen" (openapi.yaml AdminMeldung / PublicMeldung).
 --                       `source` FK'd to report_sources added alongside that table, nullable
---                       since existing rows predate the feature.
+--                       since existing rows predate the feature. `newsletter_requested_at` added
+--                       2026-10-10 via migrations/Version20261010000000.php -- see
+--                       App\Service\ReportSubmissionService::requestNewsletterSignup().
 --   report_photos   -- 0..N real uploaded photos per report (data-contract.md §2.4 -- base64
 --                       must not carry over, so this is a proper child table of URLs, not a
 --                       JSON/serialized column). `display_url` added 2026-10-08 via
@@ -157,6 +159,7 @@ CREATE TABLE reports (
   status                   ENUM('pending_email_confirmation','pending_review','published','declined') NOT NULL DEFAULT 'pending_email_confirmation',
   confirmation_token       VARCHAR(128) NULL COMMENT 'consumed by GET /meldungen/confirm/{token}',
   confirmation_expires_at  DATETIME NULL,
+  newsletter_requested_at  DATETIME NULL COMMENT 'set when the reporter asks, on the confirm landing page, to be added to the newsletter -- not a real subscription, just a flag for manual newsletter-list addition',
   internal_note            TEXT NULL COMMENT 'moderation-only free text, never exposed publicly (openapi.yaml AdminMeldungPatch.internalNote)',
   moderated_by             BIGINT UNSIGNED NULL,
   moderated_at             DATETIME NULL,

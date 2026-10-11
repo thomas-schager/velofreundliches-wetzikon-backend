@@ -22,6 +22,11 @@ parameters:
     # both the target and its label can be changed in one place without touching the template.
     app.velomelder_back_url: '/velomelder-gelbes-band.html'
     app.velomelder_back_label: 'Zurück zur Karte'
+    # Plain list, one address per line -- people already on the real newsletter who shouldn't be
+    # offered the newsletter signup CTA again. Committed (not var/), so it deploys with the code
+    # and is hand-edited/updated directly in the repo. See
+    # ReportSubmissionService::isAlreadySubscribedToNewsletter().
+    app.newsletter_subscribers_file: '%kernel.project_dir%/config/newsletter_subscribers.txt'
 
 services:
     # default configuration for services in *this* file
@@ -36,6 +41,8 @@ services:
             string $testBypassFile: '%app.test_bypass_file%'
             string $velomelderBackUrl: '%app.velomelder_back_url%'
             string $velomelderBackLabel: '%app.velomelder_back_label%'
+            string $newsletterSubscribersFile: '%app.newsletter_subscribers_file%'
+            string $appSecret: '%kernel.secret%'
 
     # makes classes in src/ available to be used as services
     # this creates a service per class whose id is the fully-qualified class name

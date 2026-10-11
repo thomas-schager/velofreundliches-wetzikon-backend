@@ -21,6 +21,7 @@ use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Symfony\Component\Mailer\MailerInterface;
 use Symfony\Component\Mime\Address;
+use Symfony\Component\Mime\Email;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Component\Routing\RouterInterface;
 
@@ -33,6 +34,9 @@ class ReportSubmissionService
 {
     private const CONFIRMATION_TTL_HOURS = 48;
     private const MAX_PHOTOS = 5;
+    // Temporary, hand-maintained solution (see requestNewsletterSignup()) -- not worth the
+    // precision of an env var/config parameter, so it's hardcoded here instead.
+    private const NEWSLETTER_NOTIFY_EMAIL = 'thom@velofreundliches-wetzikon.ch';
 
     public function __construct(
         private readonly ReportRepository $reports,
@@ -45,8 +49,13 @@ class ReportSubmissionService
         private readonly CaptchaChallengeService $captcha,
         private readonly PhotoConversionService $photoConverter,
         private readonly string $uploadsDir,
+        private readonly string $newsletterSubscribersFile,
+        private readonly string $appSecret,
     ) {
     }
+
+    /** @var array<string, true>|null lazy-loaded, lowercased email => true; see isAlreadySubscribedToNewsletter() */
+    private ?array $newsletterSubscribers = null;
 
     /**
      * @param array{lat: mixed, lng: mixed, rating: mixed, comment: mixed, name?: mixed, email: mixed, address?: mixed, addressDistanceM?: mixed, source: mixed, captchaAnswer?: mixed} $data
@@ -250,6 +259,88 @@ class ReportSubmissionService
         }
 
         return $report;
+    }
+
+    /**
+     * HMAC of the report id, truncated to 32 hex chars -- lets the email-confirmation landing
+     * page (see PublicReportsController::confirmSubmit()) link/post to requestNewsletterSignup()
+     * below without a database lookup to issue the link, and without reusing confirmationToken
+     * (a different token, scoped to a different purpose -- no reason to couple the two). Not a
+     * secret worth protecting at full HMAC strength -- it only gates "send one internal
+     * notification email", not access to any data -- so the truncation is fine.
+     */
+    public function newsletterSignupSignature(int $reportId): string
+    {
+        return substr(hash_hmac('sha256', (string) $reportId, $this->appSecret), 0, 32);
+    }
+
+    /**
+     * Whether $email is already on the real newsletter -- see config/newsletter_subscribers.txt
+     * (plain list, one address per line, hand-edited/committed). Used to hide the "Ja -- den
+     * Newsletter erhalten" CTA for people who'd already get it, see
+     * PublicReportsController::confirmSubmit(). Case-insensitive, same as email addresses
+     * generally are in practice. Missing file -> treated as an empty list, not an error -- a
+     * suppression list that failed to load should never block the confirmation flow itself.
+     */
+    public function isAlreadySubscribedToNewsletter(string $email): bool
+    {
+        if ($this->newsletterSubscribers === null) {
+            $this->newsletterSubscribers = [];
+            if (is_readable($this->newsletterSubscribersFile)) {
+                foreach (file($this->newsletterSubscribersFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+                    $this->newsletterSubscribers[mb_strtolower(trim($line))] = true;
+                }
+            }
+        }
+
+        return isset($this->newsletterSubscribers[mb_strtolower(trim($email))]);
+    }
+
+    /**
+     * Called when a reporter asks, on the email-confirmation landing page, to be added to the
+     * newsletter. Doesn't subscribe anyone to anything itself (see Report::$newsletterRequestedAt's
+     * docblock) -- just notifies NEWSLETTER_NOTIFY_EMAIL so a human adds the address to the
+     * real newsletter list by hand, per the project's explicit choice to keep this out of the
+     * submission form and out of any real subscription-service integration for now.
+     */
+    public function requestNewsletterSignup(int $reportId, string $signature): void
+    {
+        if (!hash_equals($this->newsletterSignupSignature($reportId), $signature)) {
+            throw new ReportNotFoundException('Invalid or expired link.');
+        }
+
+        $report = $this->reports->find($reportId);
+        if ($report === null) {
+            throw new ReportNotFoundException('No such report.');
+        }
+
+        if ($report->getNewsletterRequestedAt() !== null) {
+            return; // already requested -- idempotent, avoids a second notification on a double click/retry
+        }
+
+        // Defense in depth -- the CTA that posts here is already hidden for these addresses
+        // (see PublicReportsController::confirmSubmit()), but this method is reachable directly
+        // given a valid signature, so the suppression has to hold here too, not just in the UI.
+        if ($this->isAlreadySubscribedToNewsletter($report->getEmail())) {
+            return;
+        }
+
+        $report->setNewsletterRequestedAt(new DateTimeImmutable());
+        $this->em->flush();
+
+        try {
+            $this->mailer->send((new Email())
+                ->from(new Address('notifications@velofreundliches-wetzikon.ch', 'Velofreundliches Wetzikon'))
+                ->to(self::NEWSLETTER_NOTIFY_EMAIL)
+                ->subject('Newsletter-Interesse über VeloMelder')
+                ->text(sprintf(
+                    "Jemand möchte nach dem Bestätigen einer Meldung (%s) über den Newsletter informiert werden.\n\nE-Mail-Adresse: %s\n",
+                    ReportPresenter::formatId($report->getId()),
+                    $report->getEmail(),
+                )));
+        } catch (TransportExceptionInterface $e) {
+            $this->logger->warning('Could not send newsletter-signup notification email', ['exception' => $e->getMessage()]);
+        }
     }
 
     /** @param array<array{large: string, display: string}> $photoBlobs already converted via PhotoConversionService */

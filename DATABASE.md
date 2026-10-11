@@ -12,11 +12,12 @@ DEPLOY.md §8) can build the whole schema via `doctrine:migrations:migrate` alon
 the tables here were already created by hand-loading `schema.sql`, it's marked applied
 (`doctrine:migrations:version --add`) *without* being executed -- same reasoning as below.
 
-Four more migrations have followed since: `Version20260903185437.php` (column type/constraint
+Five more migrations have followed since: `Version20260903185437.php` (column type/constraint
 cleanup -- originally marked applied without running, like the baseline, but has since actually
 been executed for real against dev too), `Version20260904075016.php` (adds `route_backups`),
-`Version20261002000000.php` (adds `report_sources` and `reports.source`), and
-`Version20261008000000.php` (adds `report_photos.display_url`). All five show as executed on dev
+`Version20261002000000.php` (adds `report_sources` and `reports.source`),
+`Version20261008000000.php` (adds `report_photos.display_url`), and `Version20261010000000.php`
+(adds `reports.newsletter_requested_at`). All six show as executed on dev
 (`php bin/console doctrine:migrations:status`) — dev's live schema matches `schema.sql` below
 exactly, nothing pending. `app/src/Entity/*.php` — not this file — is now the source of truth for
 the schema; re-derive `schema.sql` from the entities (or from a real `SHOW CREATE TABLE`) if it
