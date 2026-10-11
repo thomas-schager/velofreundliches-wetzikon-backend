@@ -40,11 +40,14 @@
         <tr class="adm-table-row--link" onclick="location.href='{{ path('admin_meldung_detail', {id: report_id(r.id)}) }}?status={{ current_status }}'">
           <td><span class="adm-rate-pill" data-r="{{ r.rating }}">{{ rating_labels[r.rating]|default(r.rating) }}</span></td>
           <td class="adm-td-comment">{{ comment_flat|length > 140 ? comment_flat|slice(0, 140) ~ '…' : comment_flat }}</td>
-          <td class="adm-td-muted">
+          <td>
             {% if r.photos|length > 0 %}
-              <i data-lucide="image" width="14" height="14"></i> {{ r.photos|length }}
+              <div class="adm-table-thumb">
+                <img src="{{ (r.photos|first).displayUrl }}" alt="" loading="lazy">
+                {% if r.photos|length > 1 %}<span class="adm-table-thumb__count">+{{ r.photos|length - 1 }}</span>{% endif %}
+              </div>
             {% else %}
-              —
+              <span class="adm-td-muted">—</span>
             {% endif %}
           </td>
           <td class="adm-td-muted">{{ r.address ?: '—' }}</td>
