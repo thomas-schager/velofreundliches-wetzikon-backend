@@ -234,6 +234,8 @@ textarea.field-invalid { border-color: var(--vw-primary); box-shadow: 0 0 0 3px 
 .upload-area { border: 1px dashed var(--vw-border-strong); border-radius: var(--vw-radius-sm); padding: 14px 10px; text-align: center; cursor: pointer; transition: border-color var(--vw-dur) var(--vw-ease), background var(--vw-dur); margin-top: 2px; position: relative; background: var(--vw-surface-2); min-height: 52px; display: flex; align-items: center; justify-content: center; }
 .upload-area:hover, .upload-area.drag-over { border-color: var(--vw-border-strong); background: var(--vw-surface-2); }
 .upload-area input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.upload-area.is-full { cursor: default; opacity: 0.6; }
+.upload-area.is-full input[type=file] { cursor: default; pointer-events: none; }
 .upload-hint { font-size: var(--text-sm); color: var(--vw-muted-strong); line-height: 1.5; font-family: var(--vw-font-body); }
 .upload-hint strong { color: var(--vw-dark); font-weight: 500; }
 .photo-previews { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: 10px; }
@@ -588,7 +590,7 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
           <label class="field-label" for="photo-input">Fotos <span class="field-optional">(optional)</span></label>
           <div class="upload-area" id="upload-area">
             <input type="file" id="photo-input" accept="image/*" multiple aria-label="Fotos auswählen" />
-            <div class="upload-hint" aria-hidden="true"><strong>Fotos auswählen</strong> oder hierher ziehen</div>
+            <div class="upload-hint" id="upload-hint" aria-hidden="true"><strong>Fotos auswählen</strong> oder hierher ziehen (max. 5)</div>
           </div>
           <div class="photo-previews" id="photo-previews" aria-label="Hochgeladene Fotos"></div>
         </div>
@@ -1522,6 +1524,7 @@ function openModal(latlng) {
   document.getElementById('hint-comment').classList.remove('visible');
   document.getElementById('photo-input').value = '';
   document.getElementById('photo-previews').innerHTML = '';
+  updateUploadAreaState();
   document.getElementById('modal-coords').textContent = latlng.lat.toFixed(5) + ', ' + latlng.lng.toFixed(5);
   document.getElementById('address-text').textContent = '';
   document.getElementById('address-loading').style.display = 'inline';
@@ -1848,18 +1851,70 @@ ua.addEventListener('dragover', function(e) { e.preventDefault(); if (formFrozen
 ua.addEventListener('dragleave', function() { this.classList.remove('drag-over'); });
 ua.addEventListener('drop', function(e) { e.preventDefault(); this.classList.remove('drag-over'); if (formFrozen) return; handleFiles(e.dataTransfer.files); });
 
+// Keep these in sync with ReportSubmissionService's own MAX_PHOTOS/MAX_PHOTO_BYTES -- the
+// server enforces the real limits regardless, this is just about failing fast with a clear
+// message here instead of a cryptic server error (or a silently-truncated upload) later.
+// MAX_TOTAL_PHOTO_BYTES stays well under the server's post_max_size (confirmed 64 MB on
+// Hostpoint, see DEPLOY.md/internals.md) even with all 5 photos at the per-file cap at once,
+// plus room for the rest of the form.
+var MAX_PHOTOS = 5;
+var MAX_PHOTO_BYTES = 15 * 1024 * 1024;
+var MAX_TOTAL_PHOTO_BYTES = 55 * 1024 * 1024;
+
+function pendingPhotosTotalBytes() {
+  return pendingPhotos.reduce(function(sum, p) { return sum + p.file.size; }, 0);
+}
+
+function updateUploadAreaState() {
+  var full = pendingPhotos.length >= MAX_PHOTOS;
+  document.getElementById('upload-area').classList.toggle('is-full', full);
+  document.getElementById('photo-input').disabled = full;
+  document.getElementById('upload-hint').innerHTML = full
+    ? 'Maximal ' + MAX_PHOTOS + ' Fotos erreicht'
+    : '<strong>Fotos auswählen</strong> oder hierher ziehen (max. ' + MAX_PHOTOS + ')';
+}
+
 function handleFiles(files) {
+  // pendingPhotos only grows once each FileReader finishes (async, see below) -- selecting many
+  // files at once (e.g. "select all" in a folder) calls this once with the whole batch, and the
+  // loop below runs fully *before* any reader.onload fires. Checking pendingPhotos.length (or
+  // re-deriving the running byte total from it) inside that loop would therefore see the same
+  // stale, not-yet-updated count/total for every file in the batch -- so a 12-photo batch could
+  // sail straight past the limits with no warning at all. Track both synchronously here instead,
+  // decremented/incremented as files are *provisionally* accepted within this one call.
+  var remainingSlots = MAX_PHOTOS - pendingPhotos.length;
+  var remainingBytes = MAX_TOTAL_PHOTO_BYTES - pendingPhotosTotalBytes();
+  var rejectedForCount = false;
+
   Array.from(files).forEach(function(file) {
     if (!file.type || !file.type.startsWith('image/')) return;
-    if (pendingPhotos.length >= 5) return;
+    if (remainingSlots <= 0) {
+      rejectedForCount = true;
+      return;
+    }
+    if (file.size > MAX_PHOTO_BYTES) {
+      showToast('Foto zu gross (max. ' + Math.round(MAX_PHOTO_BYTES / 1024 / 1024) + ' MB).');
+      return;
+    }
+    if (file.size > remainingBytes) {
+      showToast('Fotos zusammen zu gross -- bitte weniger oder kleinere Fotos wählen.');
+      return;
+    }
+    remainingSlots--;
+    remainingBytes -= file.size;
     var reader = new FileReader();
     reader.onload = function(e) {
       var id = Date.now() + Math.random();
       pendingPhotos.push({ id: id, dataUrl: e.target.result, file: file });
       renderThumb(id, e.target.result);
+      updateUploadAreaState();
     };
     reader.readAsDataURL(file);
   });
+
+  if (rejectedForCount) {
+    showToast('Maximal ' + MAX_PHOTOS + ' Fotos möglich.');
+  }
 }
 
 function renderThumb(id, dataUrl) {
@@ -1879,6 +1934,7 @@ function renderThumb(id, dataUrl) {
 function removePhoto(id) {
   pendingPhotos = pendingPhotos.filter(function(p) { return p.id !== id; });
   var el = document.getElementById('thumb-' + id); if (el) el.remove();
+  updateUploadAreaState();
 }
 
 // ============================================================================================

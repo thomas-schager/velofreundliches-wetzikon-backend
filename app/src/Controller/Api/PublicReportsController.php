@@ -67,6 +67,19 @@ class PublicReportsController extends AbstractApiController
     #[Route('/reports', name: 'api_reports_submit', methods: ['POST'])]
     public function submit(Request $request): JsonResponse
     {
+        // PHP silently empties $_POST/$_FILES, with no per-field error anywhere, when the whole
+        // request body exceeds post_max_size -- Content-Length vs. that ini setting is the only
+        // remaining signal (see the post_max_size manual page). Caught here, before anything
+        // else, so an oversized upload surfaces as a clear error instead of looking like a form
+        // with every required field left empty. ReportSubmissionService::MAX_PHOTO_BYTES (and
+        // the client-side copy in velomelder-gelbes-band.html) is meant to keep real users well
+        // clear of this in practice; this is the backstop for anyone who isn't.
+        $postMaxBytes = self::iniToBytes(ini_get('post_max_size'));
+        $contentLength = (int) $request->headers->get('Content-Length', '0');
+        if ($postMaxBytes > 0 && $contentLength > $postMaxBytes) {
+            return $this->errorResponse('validation_error', 'Request body failed validation.', 400, ['photos' => 'combined upload size exceeds the server limit']);
+        }
+
         if (!$request->headers->has('X-Challenge-Token')) {
             return $this->errorResponse('validation_error', 'X-Challenge-Token header is required.', 400);
         }
@@ -179,5 +192,23 @@ class PublicReportsController extends AbstractApiController
         }
 
         return new JsonResponse(['ok' => true]);
+    }
+
+    /** Parses a php.ini shorthand size ("64M", "1G", a bare number of bytes) into bytes. */
+    private static function iniToBytes(string|false $value): int
+    {
+        if ($value === false || trim($value) === '') {
+            return 0;
+        }
+        $value = trim($value);
+        $unit = strtolower(substr($value, -1));
+        $number = (int) $value;
+
+        return match ($unit) {
+            'g' => $number * 1024 * 1024 * 1024,
+            'm' => $number * 1024 * 1024,
+            'k' => $number * 1024,
+            default => $number,
+        };
     }
 }

@@ -34,6 +34,12 @@ class ReportSubmissionService
 {
     private const CONFIRMATION_TTL_HOURS = 48;
     private const MAX_PHOTOS = 5;
+    // Keep in sync with velomelder-gelbes-band.html's own MAX_PHOTO_BYTES -- that client-side
+    // copy exists purely to fail fast with a clear message; this is the real, authoritative
+    // limit. Comfortably below the server's post_max_size (confirmed 64 MB on Hostpoint, see
+    // DEPLOY.md/internals.md) even for all 5 photos at once, and well below memory_limit (256
+    // MB) for what Imagick needs to decode one image of this size.
+    private const MAX_PHOTO_BYTES = 15 * 1024 * 1024;
     // Temporary, hand-maintained solution (see requestNewsletterSignup()) -- not worth the
     // precision of an env var/config parameter, so it's hardcoded here instead.
     private const NEWSLETTER_NOTIFY_EMAIL = 'thom@velofreundliches-wetzikon.ch';
@@ -107,11 +113,25 @@ class ReportSubmissionService
             $errors['source'] = 'required, must be a known key in report_sources';
         }
 
-        // Converted here, before the report is ever persisted, so a corrupt/unreadable photo
-        // fails validation cleanly instead of leaving behind a Report row with no photos.
+        // Converted here, before the report is ever persisted, so a corrupt/unreadable/oversized
+        // photo fails validation cleanly instead of leaving behind a Report row with no photos
+        // (or an Imagick call let loose on something far bigger than it should ever see).
         $photoBlobs = [];
         if (count($photos) <= self::MAX_PHOTOS) {
             foreach ($photos as $photo) {
+                // !isValid() covers a single file individually exceeding upload_max_filesize --
+                // PHP still reports that slot (error code set, no real tmp file), unlike the
+                // whole-request-too-large case, which empties $_FILES entirely and is instead
+                // caught before this method is ever called, see
+                // PublicReportsController::submit().
+                if (!$photo->isValid()) {
+                    $errors['photos'] = 'one or more photos failed to upload';
+                    continue;
+                }
+                if ($photo->getSize() > self::MAX_PHOTO_BYTES) {
+                    $errors['photos'] = 'one or more photos exceed the ' . (int) (self::MAX_PHOTO_BYTES / 1024 / 1024) . ' MB limit per photo';
+                    continue;
+                }
                 try {
                     $photoBlobs[] = $this->photoConverter->convertToWebp($photo->getPathname());
                 } catch (RuntimeException) {
