@@ -152,9 +152,13 @@
 </main>
 
 <!-- Photo viewer -- same <dialog>/prev-next/counter pattern as velomelder-gelbes-band.html's
-     shared photo viewer (view mode: no remove action here, that lives in the inline gallery
-     below it instead, see renderPhotoGallery()). -->
+     shared photo viewer. The delete button is hidden in view mode and shown in edit mode (see
+     renderAdminPhotoViewer()) -- same underlying action as the inline gallery's delete button,
+     just reachable from the full-size view too. -->
 <dialog class="adm-photo-viewer" id="admPhotoViewer">
+  <button class="adm-photo-viewer-delete" id="admPhotoViewerDelete" onclick="removeAdminPhotoFromViewer()" type="button" hidden>
+    <i data-lucide="trash-2" width="15" height="15" aria-hidden="true"></i> Foto löschen
+  </button>
   <button class="adm-photo-viewer-close" onclick="closeAdminPhotoViewer()" type="button" aria-label="Schliessen">
     <svg width="16" height="16" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><line x1="1" y1="1" x2="13" y2="13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><line x1="13" y1="1" x2="1" y2="13" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
   </button>
@@ -415,7 +419,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var html = '<div class="adm-photo-gallery"><div class="adm-photo-main-wrap">'
       + '<img class="adm-photo-main" id="admPhotoMain" src="' + photos[mainIndex].displayUrl + '" alt="Foto -- antippen zum Vergrössern" onclick="openAdminPhotoViewer(window.admPhotoIndex)" loading="lazy" decoding="async">';
     if (editMode) {
-      html += '<button type="button" class="adm-photo-thumb__remove" onclick="removeAdminPhoto(' + photos[mainIndex].id + ')" aria-label="Foto löschen" title="Foto löschen"><i data-lucide="x" width="12" height="12"></i></button>';
+      html += '<button type="button" class="adm-photo-delete-btn" onclick="removeAdminPhoto(' + photos[mainIndex].id + ')" aria-label="Foto löschen" title="Foto löschen"><i data-lucide="trash-2" width="16" height="16"></i></button>';
     }
     html += '</div>';
     if (photos.length > 1) {
@@ -431,9 +435,10 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   /* ---- Photo viewer -- same <dialog>/prev-next/counter pattern as velomelder-gelbes-band.html's
-     shared photo viewer, view-only (no remove action in here; that lives in the inline gallery
-     above, see renderPhotoGallery()). Navigates over visiblePhotos() so a photo staged for
-     deletion while editing drops out of the full viewer too, not just the inline gallery. */
+     shared photo viewer. Delete button shown only in edit mode (same underlying action as the
+     inline gallery's, see removeAdminPhotoFromViewer()) -- see renderPhotoGallery() for the
+     inline one. Navigates over visiblePhotos() so a photo staged for deletion while editing
+     drops out of the full viewer too, not just the inline gallery. */
   var admPhotoViewerIndex = 0;
   function openAdminPhotoViewer(startIndex) {
     admPhotoViewerIndex = startIndex || 0;
@@ -445,16 +450,29 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('admPhotoViewer').close();
   }
   function renderAdminPhotoViewer() {
-    var urls = visiblePhotos().map(function (p) { return p.url; });
-    var url = urls[admPhotoViewerIndex];
-    if (!url) { closeAdminPhotoViewer(); return; }
-    document.getElementById('admPhotoViewerImg').src = url;
+    var photos = visiblePhotos();
+    var photo = photos[admPhotoViewerIndex];
+    if (!photo) { closeAdminPhotoViewer(); return; }
+    document.getElementById('admPhotoViewerImg').src = photo.url;
     document.getElementById('admPhotoViewerPrev').disabled = admPhotoViewerIndex <= 0;
-    document.getElementById('admPhotoViewerNext').disabled = admPhotoViewerIndex >= urls.length - 1;
+    document.getElementById('admPhotoViewerNext').disabled = admPhotoViewerIndex >= photos.length - 1;
+    document.getElementById('admPhotoViewerDelete').hidden = !editMode;
     var counter = document.getElementById('admPhotoViewerCounter');
-    counter.classList.toggle('multi', urls.length > 1);
-    counter.textContent = (admPhotoViewerIndex + 1) + ' / ' + urls.length;
+    counter.classList.toggle('multi', photos.length > 1);
+    counter.textContent = (admPhotoViewerIndex + 1) + ' / ' + photos.length;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
   }
+  function removeAdminPhotoFromViewer() {
+    var photo = visiblePhotos()[admPhotoViewerIndex];
+    if (!photo) return;
+    removeAdminPhoto(photo.id);
+    window.admPhotoIndex = admPhotoViewerIndex;
+    var remaining = visiblePhotos();
+    if (remaining.length === 0) { closeAdminPhotoViewer(); return; }
+    if (admPhotoViewerIndex >= remaining.length) admPhotoViewerIndex = remaining.length - 1;
+    renderAdminPhotoViewer();
+  }
+  window.removeAdminPhotoFromViewer = removeAdminPhotoFromViewer;
   function adminPhotoViewerStep(delta) {
     var urls = visiblePhotos().map(function (p) { return p.url; });
     var next = admPhotoViewerIndex + delta;
