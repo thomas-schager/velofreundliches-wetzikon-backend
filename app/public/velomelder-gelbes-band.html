@@ -419,7 +419,7 @@ input[type=text].field-invalid, input[type=email].field-invalid { border-color: 
 /* On-scale now (--text-base/--lh-relaxed -- was a hand-picked 15px, then 16px that happened to
    already match). Slightly bigger than regular body text since this is the one thing a report
    is actually about -- it should visually lead. */
-.detail-comment { font-size: var(--text-base); line-height: var(--lh-relaxed); color: var(--vw-dark); white-space: pre-wrap; }
+.detail-comment { font-size: var(--text-base); line-height: var(--lh-relaxed); color: var(--vw-dark); white-space: pre-wrap; overflow-wrap: break-word; }
 /* A one-liner like "Ampel funktioniert nicht" reads as more of a headline than a paragraph --
    letting it sit larger (set via JS in openDetailModal(), under 100 characters) makes short
    reports feel intentional rather than just small, instead of at the same size as a

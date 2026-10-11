@@ -355,6 +355,11 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
    ============================================================ */
 .adm-detail-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-6); }
 @media (min-width: 1080px) { .adm-detail-grid { grid-template-columns: 1fr 380px; align-items: start; } }
+/* Grid items default to min-width: auto, i.e. never shrink below their content's intrinsic
+   width -- an unbroken long string (e.g. a comment with no spaces) would otherwise grow the
+   left column (and the whole grid) past the page instead of wrapping inside it, no matter what
+   overflow-wrap says on the text itself. min-width: 0 removes that floor. */
+.adm-detail-grid > div { min-width: 0; }
 
 /* z-index: 0 (with position: relative) deliberately creates a new stacking context here --
    without it, Leaflet's own internal panes/controls (z-index up to 1000, see the comment below)
@@ -465,7 +470,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--color-primary); 
 .adm-report-meta[hidden] { display: none; }
 .adm-report-address { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--color-text-muted); }
 .adm-report-byline { font-size: 13px; color: var(--color-muted); margin-bottom: 14px; }
-.adm-report-comment { font-size: 14px; line-height: 1.6; color: var(--color-text); white-space: pre-wrap; margin-bottom: 18px; }
+.adm-report-comment { font-size: 14px; line-height: 1.6; color: var(--color-text); white-space: pre-wrap; overflow-wrap: break-word; margin-bottom: 18px; }
 
 /* Ablehnen/Veröffentlichen directly below the content they judge, not a page-wide sticky bar
    (see .adm-sticky-actions below, still used by the route editor's Speichern). */
