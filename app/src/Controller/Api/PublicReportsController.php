@@ -10,9 +10,12 @@ use App\Service\Exception\ReportNotFoundException;
 use App\Service\Exception\ValidationException;
 use App\Service\ReportPresenter;
 use App\Service\ReportSubmissionService;
+use Psr\Log\LoggerInterface;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\RateLimiter\RateLimiterFactory;
 use Symfony\Component\Routing\Attribute\Route;
 
 /**
@@ -20,6 +23,12 @@ use Symfony\Component\Routing\Attribute\Route;
  * Replaces the static velo-meldungen.json fetch. Anti-abuse: the X-Challenge-Token header is
  * verified against a server-issued arithmetic challenge (see GET /reports/challenge and
  * CaptchaChallengeService) -- the client cannot supply its own operands/answer and pass.
+ *
+ * submit() is additionally rate-limited by both IP and the submitted email (see
+ * config/packages/rate_limiter.yaml) -- the captcha alone only deters opportunistic bots, not a
+ * script willing to solve a single-digit sum, and the real harm (a confirmation email sent to
+ * whoever's address was submitted) tracks the target address, not the source IP an attacker could
+ * rotate.
  */
 class PublicReportsController extends AbstractApiController
 {
@@ -29,6 +38,11 @@ class PublicReportsController extends AbstractApiController
         private readonly CaptchaChallengeService $captcha,
         private readonly string $velomelderBackUrl,
         private readonly string $velomelderBackLabel,
+        #[Autowire(service: 'limiter.report_submit_ip')]
+        private readonly RateLimiterFactory $reportSubmitIpLimiter,
+        #[Autowire(service: 'limiter.report_submit_email')]
+        private readonly RateLimiterFactory $reportSubmitEmailLimiter,
+        private readonly LoggerInterface $securityLogger,
     ) {
     }
 
@@ -67,6 +81,18 @@ class PublicReportsController extends AbstractApiController
     #[Route('/reports', name: 'api_reports_submit', methods: ['POST'])]
     public function submit(Request $request): JsonResponse
     {
+        // Cheapest possible check, first: reject an over-quota IP before touching the request
+        // body, $_FILES, or the captcha cache at all.
+        $ipLimit = $this->reportSubmitIpLimiter->create($request->getClientIp())->consume();
+        if (!$ipLimit->isAccepted()) {
+            $this->securityLogger->warning('Rate limit exceeded on POST /reports', [
+                'ip' => $request->getClientIp(),
+                'ipLimited' => true,
+            ]);
+
+            return $this->rateLimitedResponse($ipLimit);
+        }
+
         // PHP silently empties $_POST/$_FILES, with no per-field error anywhere, when the whole
         // request body exceeds post_max_size -- Content-Length vs. that ini setting is the only
         // remaining signal (see the post_max_size manual page). Caught here, before anything
@@ -82,6 +108,22 @@ class PublicReportsController extends AbstractApiController
 
         if (!$request->headers->has('X-Challenge-Token')) {
             return $this->errorResponse('validation_error', 'X-Challenge-Token header is required.', 400);
+        }
+
+        // Checked before photo processing (not just before persisting) so an already-throttled
+        // caller can't still burn Imagick/disk work on every request -- the target address is
+        // the thing actually being protected here (see class docblock), so this is consumed
+        // regardless of what the IP limiter above decided.
+        $email = mb_strtolower(trim((string) $request->request->get('email', '')));
+        $emailLimit = $this->reportSubmitEmailLimiter->create($email)->consume();
+        if (!$emailLimit->isAccepted()) {
+            $this->securityLogger->warning('Rate limit exceeded on POST /reports', [
+                'ip' => $request->getClientIp(),
+                'email' => $email,
+                'emailLimited' => true,
+            ]);
+
+            return $this->rateLimitedResponse($emailLimit);
         }
 
         $photos = $request->files->get('photos');

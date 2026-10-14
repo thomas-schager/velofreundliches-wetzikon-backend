@@ -330,6 +330,7 @@ paths:
                 type: object
                 properties:
                   challengeToken: { type: string }
+        '429': { $ref: '#/components/responses/RateLimited' }
 
   /auth/forgot-password/verify:
     post:

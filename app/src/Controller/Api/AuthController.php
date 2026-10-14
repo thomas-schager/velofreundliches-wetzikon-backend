@@ -8,10 +8,13 @@ use App\Service\Exception\ExpiredChallengeException;
 use App\Service\Exception\InvalidChallengeException;
 use App\Service\Exception\InvalidCredentialsException;
 use App\Service\Exception\ValidationException;
+use Psr\Log\LoggerInterface;
 use Symfony\Bundle\SecurityBundle\Security;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\RateLimiter\RateLimiterFactory;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\CurrentUser;
 
@@ -20,12 +23,30 @@ use Symfony\Component\Security\Http\Attribute\CurrentUser;
  * is handled by App\Security\LoginVerifyAuthenticator instead of a plain controller action,
  * because it's the one request that actually establishes the session; this controller only
  * carries the fallback (unreachable in normal operation, see that class's docblock).
+ *
+ * login()/forgotPassword() are rate-limited by both IP and the submitted email (see
+ * config/packages/rate_limiter.yaml) -- IP alone doesn't stop a distributed attack on one
+ * account, and email alone doesn't stop one machine grinding through many accounts. Consumed on
+ * every attempt regardless of outcome, so a correct password without the 2FA code still counts
+ * against the limit. forgotPassword() needs this independently of login()'s limiter: it needs no
+ * credentials at all and, by design (see AuthService::requestPasswordReset()'s docblock), always
+ * "succeeds" and emails a fresh code -- unrestricted, that's a mail-bomb vector against the
+ * account's real inbox.
  */
 class AuthController extends AbstractApiController
 {
     public function __construct(
         private readonly AuthService $authService,
         private readonly Security $security,
+        #[Autowire(service: 'limiter.login_ip')]
+        private readonly RateLimiterFactory $loginIpLimiter,
+        #[Autowire(service: 'limiter.login_email')]
+        private readonly RateLimiterFactory $loginEmailLimiter,
+        #[Autowire(service: 'limiter.forgot_password_ip')]
+        private readonly RateLimiterFactory $forgotPasswordIpLimiter,
+        #[Autowire(service: 'limiter.forgot_password_email')]
+        private readonly RateLimiterFactory $forgotPasswordEmailLimiter,
+        private readonly LoggerInterface $securityLogger,
     ) {
     }
 
@@ -35,6 +56,19 @@ class AuthController extends AbstractApiController
         $data = json_decode($request->getContent(), true) ?? [];
         $email = (string) ($data['email'] ?? '');
         $password = (string) ($data['password'] ?? '');
+
+        $ipLimit = $this->loginIpLimiter->create($request->getClientIp())->consume();
+        $emailLimit = $this->loginEmailLimiter->create(mb_strtolower(trim($email)))->consume();
+        if (!$ipLimit->isAccepted() || !$emailLimit->isAccepted()) {
+            $this->securityLogger->warning('Rate limit exceeded on /auth/login', [
+                'ip' => $request->getClientIp(),
+                'email' => $email,
+                'ipLimited' => !$ipLimit->isAccepted(),
+                'emailLimited' => !$emailLimit->isAccepted(),
+            ]);
+
+            return $this->rateLimitedResponse($ipLimit->isAccepted() ? $emailLimit : $ipLimit);
+        }
 
         try {
             $result = $this->authService->requestLoginChallenge($email, $password, $request->headers->get('X-Test-Bypass-Token'));
@@ -58,6 +92,19 @@ class AuthController extends AbstractApiController
     {
         $data = json_decode($request->getContent(), true) ?? [];
         $email = (string) ($data['email'] ?? '');
+
+        $ipLimit = $this->forgotPasswordIpLimiter->create($request->getClientIp())->consume();
+        $emailLimit = $this->forgotPasswordEmailLimiter->create(mb_strtolower(trim($email)))->consume();
+        if (!$ipLimit->isAccepted() || !$emailLimit->isAccepted()) {
+            $this->securityLogger->warning('Rate limit exceeded on /auth/forgot-password', [
+                'ip' => $request->getClientIp(),
+                'email' => $email,
+                'ipLimited' => !$ipLimit->isAccepted(),
+                'emailLimited' => !$emailLimit->isAccepted(),
+            ]);
+
+            return $this->rateLimitedResponse($ipLimit->isAccepted() ? $emailLimit : $ipLimit);
+        }
 
         $result = $this->authService->requestPasswordReset($email, $request->headers->get('X-Test-Bypass-Token'));
 

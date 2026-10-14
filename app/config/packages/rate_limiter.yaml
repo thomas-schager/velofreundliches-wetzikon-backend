@@ -1,0 +1,36 @@
+# Backs AuthController (login/forgot-password brute-force & mail-bomb protection) and
+# PublicReportsController::submit() (report-submission abuse protection) -- see each
+# controller for where these are actually consumed. All use cache.app (filesystem-backed,
+# no Redis needed), the same pool CaptchaChallengeService already relies on.
+framework:
+    rate_limiter:
+        login_ip:
+            policy: 'sliding_window'
+            limit: 10
+            interval: '15 minutes'
+            cache_pool: cache.app
+        login_email:
+            policy: 'sliding_window'
+            limit: 5
+            interval: '15 minutes'
+            cache_pool: cache.app
+        forgot_password_ip:
+            policy: 'sliding_window'
+            limit: 5
+            interval: '1 hour'
+            cache_pool: cache.app
+        forgot_password_email:
+            policy: 'sliding_window'
+            limit: 3
+            interval: '1 hour'
+            cache_pool: cache.app
+        report_submit_ip:
+            policy: 'sliding_window'
+            limit: 5
+            interval: '10 minutes'
+            cache_pool: cache.app
+        report_submit_email:
+            policy: 'sliding_window'
+            limit: 5
+            interval: '1 hour'
+            cache_pool: cache.app

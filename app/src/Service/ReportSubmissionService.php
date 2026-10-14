@@ -132,6 +132,10 @@ class ReportSubmissionService
                     $errors['photos'] = 'one or more photos exceed the ' . (int) (self::MAX_PHOTO_BYTES / 1024 / 1024) . ' MB limit per photo';
                     continue;
                 }
+                if (!$this->photoConverter->isSupportedImage($photo->getPathname())) {
+                    $errors['photos'] = 'one or more photos are not a supported image type';
+                    continue;
+                }
                 try {
                     $photoBlobs[] = $this->photoConverter->convertToWebp($photo->getPathname());
                 } catch (RuntimeException) {

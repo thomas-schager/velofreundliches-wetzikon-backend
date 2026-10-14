@@ -26,6 +26,16 @@ class PhotoConversionService
     private const QUALITY_DISPLAY = 70;
 
     /**
+     * Real file content, not the client-supplied (trivially spoofable) Content-Type header --
+     * checked before a single byte reaches Imagick's own auto-detecting format parser. ImageMagick
+     * has a history of RCE/SSRF vulnerabilities reachable via crafted non-image files that still
+     * decode under one of its many other coders (MVG, MSL, etc. -- the "ImageTragick" class, e.g.
+     * CVE-2016-3714); gating on a real image MIME type here closes that off regardless of what the
+     * hosting environment's own ImageMagick policy.xml does or doesn't restrict.
+     */
+    private const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
+
+    /**
      * Longest-edge cap for the "large" variant, in pixels. Only the full-screen lightbox ever
      * shows this one, capped at 92vw/80vh in every viewer in this project (the public detail
      * popup, the admin gallery) -- on a 2x/retina display that's roughly 2x0.92x a typical
@@ -42,6 +52,14 @@ class PhotoConversionService
      * image at those sizes without approaching the lightbox's own resolution.
      */
     private const MAX_DIMENSION_DISPLAY = 1600;
+
+    /** @see ALLOWED_MIME_TYPES */
+    public function isSupportedImage(string $path): bool
+    {
+        $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($path);
+
+        return $mime !== false && in_array($mime, self::ALLOWED_MIME_TYPES, true);
+    }
 
     /**
      * @return array{large: string, display: string} WebP-encoded image data for both sizes
