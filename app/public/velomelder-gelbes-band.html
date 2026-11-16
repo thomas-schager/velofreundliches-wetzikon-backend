@@ -22,12 +22,29 @@
   living in app/public/, not a separate static host. All API calls below use relative paths on
   purpose, so this one file works unmodified on whichever environment serves it (testing today,
   production later via the normal promote.sh flow) without a hardcoded domain.
+
+  Embeddable via <iframe src=".../velomelder-gelbes-band.html?embed">: the ?embed param (no
+  separate file -- see isEmbedMode() in the script, and the .is-embed CSS) hides the header, the
+  +/- zoom control and the Karte/Satellit switch, leaving just the bare map. Since an iframe has
+  no room for the report form or the detail/pending popups, every click (background, a report
+  pin, a pending pin) opens the full, normal map in a new tab instead -- a report-pin click deep-
+  links straight to that Meldung there via the existing ?meldung=<id> mechanism.
 -->
 <html lang="de">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vorschlag gelbes Band – Rückmeldung</title>
+<!-- Embed mode (?embed in the URL): stamps .is-embed on <html> synchronously, before body markup
+     is parsed/painted, so the CSS below can hide header/.map-toggle with no flash-of-full-chrome.
+     Steered by a URL param (not a separate file) so the iframe src and the normal page share one
+     HTML/CSS/JS source -- see isEmbedMode() further down for the JS-side (zoom control, click
+     behavior) half of this same switch. -->
+<script>
+  if (new URLSearchParams(location.search).has('embed')) {
+    document.documentElement.classList.add('is-embed');
+  }
+</script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
@@ -88,6 +105,14 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; font-family: var(--vw-font-body); color: var(--vw-dark); }
 #map { position: absolute; inset: 0; top: 56px; cursor: crosshair !important; }
+
+/* Embed mode (?embed) -- see the <head> script that adds this class and isEmbedMode() in the
+   main script for the JS-side half (no Leaflet zoom control instantiated, clicks open the full
+   map in a new window/tab instead of the report form or the detail/pending popups). No header,
+   no map/satellite switch, no +/- zoom buttons -- just the map itself, full-bleed. */
+html.is-embed header,
+html.is-embed .map-toggle { display: none; }
+html.is-embed #map { top: 0; cursor: pointer !important; }
 
 /* Header */
 header {
@@ -769,13 +794,40 @@ var ROUTE_TYPES = []; // populated from GET /route-types before map init, see bo
 var hiddenTypes = new Set(); // never populated here (only one type exists, no toggle UI)
 var isVelonetz = false;
 
+// ============================================================================================
+// EMBED MODE -- ?embed in the URL. Meant for an <iframe src="...?embed">: no header, no +/-
+// zoom control, no Karte/Satellit switch (see the .is-embed CSS above and the zoomControl option
+// in initMap() below), and every click on the map (background, a report pin, a pending pin)
+// opens the full, normal map in a new tab instead of doing anything inside the iframe -- an
+// iframe has no room for the report form or the detail modal, so rather than cram them in, we
+// just hand off to the real page. A report-pin click still deep-links into the specific Meldung
+// over there via the existing ?meldung=<id> mechanism (see buildUrlWithMeldung() further down),
+// so the full map opens straight to the right popup instead of just centered on the city.
+// ============================================================================================
+function isEmbedMode() {
+  return new URLSearchParams(location.search).has('embed');
+}
+function buildFullMapUrl(meldungId) {
+  var params = new URLSearchParams();
+  if (meldungId) params.set('meldung', meldungId);
+  var qs = params.toString();
+  return location.pathname + (qs ? '?' + qs : '');
+}
+function openFullMapInNewWindow(meldungId) {
+  window.open(buildFullMapUrl(meldungId), '_blank', 'noopener');
+}
+
 // COMPILE:MAP-ENGINE
 var CARTO_API_KEY = 'cb1_2wxo_1_5095e615a6275239af744999';
 var map, LAYERS, currentLayer = 'street';
 var bandGroup, highlightGroup, drawnItems, decoratorGroup, waypointGroup, pendingGroup;
 
 function initMap() {
-  map = L.map('map', { center: [47.3235, 8.7985], zoom: 15 });
+  // scrollWheelZoom off in embed mode -- an embedded iframe sitting in the normal scroll flow of
+  // a host page would otherwise hijack the page's scroll the moment the cursor crosses the map
+  // (classic embedded-map trap); dragging/panning stays on since that never competes with page
+  // scroll and still lets someone explore before clicking through to the full map.
+  map = L.map('map', { center: [47.3235, 8.7985], zoom: 15, zoomControl: !isEmbedMode(), scrollWheelZoom: !isEmbedMode() });
   LAYERS = {
     street:    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=' + CARTO_API_KEY, { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>', subdomains: 'abcd', maxZoom: 19 }),
     satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',    { attribution: '&copy; <a href="https://www.esri.com/">Esri</a>', maxZoom: 19 })
@@ -799,8 +851,12 @@ function initMap() {
   }, 0);
 
   // Click anywhere on the map opens the feedback form for that point -- same interaction as
-  // velo-melder.html's default mode.
-  map.on('click', function(e) { pendingLatLng = e.latlng; openModal(e.latlng); });
+  // velo-melder.html's default mode. In embed mode, there's no form to open in the iframe, so a
+  // click opens the full map in a new tab instead (see EMBED MODE above).
+  map.on('click', function(e) {
+    if (isEmbedMode()) { openFullMapInNewWindow(); return; }
+    pendingLatLng = e.latlng; openModal(e.latlng);
+  });
 }
 
 function setLayer(name, evt) {
@@ -996,7 +1052,11 @@ function makeIcon(rating) {
 
 function addReportMarker(entry) {
   var marker = L.marker([entry.lat, entry.lng], { icon: makeIcon(entry.rating) });
-  marker.on('click', function(e) { L.DomEvent.stopPropagation(e); openDetailModal(entry); });
+  marker.on('click', function(e) {
+    L.DomEvent.stopPropagation(e);
+    if (isEmbedMode()) { openFullMapInNewWindow(entry.id); return; }
+    openDetailModal(entry);
+  });
   marker.addTo(waypointGroup);
 }
 
@@ -1068,6 +1128,7 @@ function renderPendingMarkers(publishedReports) {
     var marker = L.marker([p.lat, p.lng], { icon: makePendingIcon() });
     marker.on('click', function(e) {
       L.DomEvent.stopPropagation(e);
+      if (isEmbedMode()) { openFullMapInNewWindow(); return; }
       showToast('Deine Meldung – in Verifikation');
     });
     marker.addTo(pendingGroup);
